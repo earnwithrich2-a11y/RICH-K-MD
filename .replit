@@ -1,0 +1,66 @@
+modules = ["nodejs-20", "web"]
+
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+
+[userenv]
+
+[userenv.shared]
+AUTO_LIKE_STATUS = "false"
+AUTO_READ_STATUS = "false"
+MODE = "public"
+TIME_ZONE = "Atlantic/Reykjavik"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "startup"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow]]
+name = "startup"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run validate:startup"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5127
+externalPort = 3000
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 180000

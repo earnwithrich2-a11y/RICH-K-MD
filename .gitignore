@@ -1,0 +1,6 @@
+node_modules/
+npm-debug.log*
+screenshots/
+RICHK-MD-core/session/
+RICHK-MD-core/database/*.db
+RICHK-MD-core/database/*.db-*
