@@ -303,7 +303,7 @@ gmd(
         let formattedDate = "Not Available";
         if (setAt && setAt !== "Not Available") {
           try {
-            const tz = timeZone || "Africa/Nairobi";
+            const tz = timeZone || "Africa/Accra";
             formattedDate = moment(setAt)
               .tz(tz)
               .format("dddd, MMMM Do YYYY, h:mm A z");
@@ -1143,7 +1143,7 @@ gmd(
         forwardingScore: 1,
         isForwarded: true,
         forwardedNewsletterMessageInfo: {
-          newsletterJid: newsletterJid || "120363426409647211@newsletter",
+          newsletterJid: newsletterJid || "120363413613350472@newsletter",
           newsletterName: sourceName,
           serverMessageId: -1,
         },

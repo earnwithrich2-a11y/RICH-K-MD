@@ -17,9 +17,9 @@
       "value": "public"
     },
     "TIME_ZONE": {
-      "description": "Your timezone e.g. Africa/Nairobi, America/New_York, Asia/Kolkata",
+      "description": "Your timezone e.g. Africa/Accra, America/New_York, Asia/Kolkata",
       "required": true,
-      "value": "Africa/Nairobi"
+      "value": "Africa/Accra"
     },
     "AUTO_LIKE_STATUS": {
       "description": "Auto-like WhatsApp statuses. Set true or false.",

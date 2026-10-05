@@ -51,7 +51,7 @@ gmd(
             }
 
             const authorName = "RIVO";
-            const authorLink = "https://rivo-skills.everyshop.space";
+            const authorLink = "https://richkaurex.site";
             const commitDate = new Date(
                 commitData.commit.author.date,
             ).toLocaleString();

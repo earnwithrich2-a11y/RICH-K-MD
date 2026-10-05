@@ -164,7 +164,7 @@ const setupGroupEventsListeners = (Gifted) => {
             }
 
             const timeZone =
-                (await getSetting("TIME_ZONE")) || "Africa/Nairobi";
+                (await getSetting("TIME_ZONE")) || "Africa/Accra";
             const botName = (await getSetting("BOT_NAME")) || "RICHK-MD";
             const botFooter =
                 (await getSetting("FOOTER")) || "Powered by RICHK-MD";

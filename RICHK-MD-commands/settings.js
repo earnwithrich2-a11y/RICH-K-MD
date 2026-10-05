@@ -130,7 +130,7 @@ gmd(
 ▸ *${p}startmsg on/off* — ${formatSettingsStatus(settings.STARTING_MESSAGE)}
 ▸ *${p}pause bot on/off* — ${formatSettingsStatus(settings.BOT_PAUSED)}
 
-🌐 *https://rivo-skills.everyshop.space*`;
+🌐 *https://richkaurex.site*`;
 
       await reply(msg);
       await react("✅");
