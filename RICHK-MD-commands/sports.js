@@ -32,7 +32,7 @@ const LEAGUE_CONFIG = {
 async function getContextInfo() {
   const botName = (await getSetting("BOT_NAME")) || "RICHK-MD";
   const channelJid =
-    (await getSetting("NEWSLETTER_JID")) || "120363426409647211@newsletter";
+    (await getSetting("NEWSLETTER_JID")) || "120363413613350472@newsletter";
   return {
     mentionedJid: [],
     forwardingScore: 1,
@@ -225,7 +225,7 @@ gmd(
         }
 
         const games = Object.values(data.result.games);
-        const userTimeZone = timeZone || "Africa/Nairobi";
+        const userTimeZone = timeZone || "Africa/Accra";
 
         const now = new Date();
         const currentUserTimeStr = now.toLocaleTimeString("en-US", {

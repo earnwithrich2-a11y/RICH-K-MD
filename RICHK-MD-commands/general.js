@@ -840,7 +840,7 @@ gmd(
     if (!input) {
       await react("❌");
       return reply(
-        `❌ Provide a channel link.\nUsage: *${botPrefix}chjid* https://whatsapp.com/channel/0029VbCpYtZLtOj5LDuj7Q1p`,
+        `❌ Provide a channel link.\nUsage: *${botPrefix}chjid* https://whatsapp.com/channel/0029VbE9wUJ0Vyc8uRaMNM21`,
       );
     }
 
@@ -848,7 +848,7 @@ gmd(
     if (!channelMatch) {
       await react("❌");
       return reply(
-        "❌ Invalid channel link. Provide a valid WhatsApp channel link.\nExample: https://whatsapp.com/channel/0029VbCpYtZLtOj5LDuj7Q1p",
+        "❌ Invalid channel link. Provide a valid WhatsApp channel link.\nExample: https://whatsapp.com/channel/0029VbE9wUJ0Vyc8uRaMNM21",
       );
     }
 

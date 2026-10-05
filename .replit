@@ -12,7 +12,8 @@ expertMode = true
 AUTO_LIKE_STATUS = "false"
 AUTO_READ_STATUS = "false"
 MODE = "public"
-TIME_ZONE = "Atlantic/Reykjavik"
+TIME_ZONE = "Africa/Accra"
+OWNER_NUMBER = "233591574311"
 
 [workflows]
 runButton = "Project"

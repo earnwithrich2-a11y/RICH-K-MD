@@ -291,7 +291,7 @@ async function startGifted() {
 𝐏𝐥𝐮𝐠𝐢𝐧𝐬      : *${totalCommands}*
 𝐌𝐨𝐝𝐞        : *${md}*
 𝐎𝐰𝐧𝐞𝐫       : *${s.OWNER_NUMBER || d.OWNER_NUMBER}*
-𝐖𝐞𝐛𝐬𝐢𝐭𝐞      : *https://rivo-skills.everyshop.space*
+𝐖𝐞𝐛𝐬𝐢𝐭𝐞      : *https://richkaurex.site*
 𝐔𝐩𝐝𝐚𝐭𝐞𝐬      : *${s.NEWSLETTER_URL || d.NEWSLETTER_URL}*
 
 𝐍𝐨𝐭𝐞:  Bot may take some few seconds/minutes to sync before being ready to use.
