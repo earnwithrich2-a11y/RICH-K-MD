@@ -93,6 +93,7 @@ const {
 } = require('./RICHK-MD-core/connection/antiDeleteRecovery');
 const { findMessageForRetryWithWait } = require('./RICHK-MD-core/connection/messageRetry');
 const { persistOwnOutgoingMessages } = require('./RICHK-MD-core/connection/outgoingMessageStore');
+const { trackSelfChatDelivery } = require('./RICHK-MD-core/connection/selfChatDelivery');
 const config = require("./config");
 const googleTTS = require("google-tts-api");
 const fs = require("fs-extra");
@@ -243,6 +244,7 @@ async function startGifted() {
 
         Gifted = giftedConnect(socketConfig);
         persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
+        trackSelfChatDelivery(Gifted);
         store.bind(Gifted.ev);
 
         Gifted.ev.process(async (events) => {

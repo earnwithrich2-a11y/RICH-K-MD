@@ -1,0 +1,81 @@
+diff --git a/node_modules/gifted-baileys/lib/Socket/messages-recv.js b/node_modules/gifted-baileys/lib/Socket/messages-recv.js
+--- a/node_modules/gifted-baileys/lib/Socket/messages-recv.js
++++ b/node_modules/gifted-baileys/lib/Socket/messages-recv.js
+@@ -471,5 +471,5 @@
+         msgRetryCache.set(key, newValue);
+     };
+-    const sendMessagesAgain = async (key, ids, retryNode) => {
++    const sendMessagesAgain = async (key, ids, retryNode, receiptNode) => {
+         var _a;
+         // todo: implement a cache to store the last 256 sent messages (copy whatsmeow)
+@@ -481,5 +481,18 @@
+         // prevents the first message decryption failure
+         const sendToAll = !((_a = (0, WABinary_1.jidDecode)(participant)) === null || _a === void 0 ? void 0 : _a.device);
+-        await assertSessions([participant], true);
++        let injectedFromBundle = false;
++        const bundle = (0, Utils_1.extractE2ESessionFromRetryReceipt)(receiptNode);
++        if (bundle) {
++            try {
++                await signalRepository.injectE2ESession({ jid: participant, session: bundle });
++                injectedFromBundle = true;
++                logger.debug({ participant }, 'injected session from retry receipt key bundle');
++            } catch (error) {
++                logger.warn({ participant }, 'retry key bundle rejected; falling back to server session');
++            }
++        }
++        if (!injectedFromBundle) {
++            await assertSessions([participant], true);
++        }
+         if ((0, WABinary_1.isJidGroup)(remoteJid)) {
+             await authState.keys.set({ 'sender-key-memory': { [remoteJid]: null } });
+@@ -564,5 +577,5 @@
+                                 try {
+                                     logger.debug({ attrs, key }, 'recv retry request');
+-                                    await sendMessagesAgain(key, ids, retryNode);
++                                    await sendMessagesAgain(key, ids, retryNode, node);
+                                 }
+                                 catch (error) {
+diff --git a/node_modules/gifted-baileys/lib/Utils/signal.js b/node_modules/gifted-baileys/lib/Utils/signal.js
+--- a/node_modules/gifted-baileys/lib/Utils/signal.js
++++ b/node_modules/gifted-baileys/lib/Utils/signal.js
+@@ -96,5 +96,39 @@
+     }
+ };
+-exports.parseAndInjectE2ESessions = parseAndInjectE2ESessions;
++exports.parseAndInjectE2ESessions = parseAndInjectE2ESessions;
++const extractE2ESessionFromRetryReceipt = (receipt) => {
++    const keysNode = (0, WABinary_1.getBinaryNodeChild)(receipt, 'keys');
++    if (!keysNode) return null;
++    const buffer = (node, tag) => (0, WABinary_1.getBinaryNodeChildBuffer)(node, tag);
++    const uint = (node, tag, size) => {
++        const value = buffer(node, tag);
++        return value?.length === size ? Buffer.from(value).readUIntBE(0, size) : undefined;
++    };
++    const type = buffer(keysNode, 'type');
++    const identity = buffer(keysNode, 'identity');
++    const signedKey = (0, WABinary_1.getBinaryNodeChild)(keysNode, 'skey');
++    const registrationId = uint(receipt, 'registration', 4);
++    if (type?.length !== 1 || type[0] !== Defaults_1.KEY_BUNDLE_TYPE[0] ||
++        identity?.length !== 32 || !signedKey || !Number.isInteger(registrationId)) return null;
++    const signedPublic = buffer(signedKey, 'value');
++    const signature = buffer(signedKey, 'signature');
++    const signedId = uint(signedKey, 'id', 3);
++    if (signedPublic?.length !== 32 || signature?.length !== 64 || !Number.isInteger(signedId)) return null;
++    const preKeyNode = (0, WABinary_1.getBinaryNodeChild)(keysNode, 'key');
++    let preKey;
++    if (preKeyNode) {
++        const publicKey = buffer(preKeyNode, 'value');
++        const keyId = uint(preKeyNode, 'id', 3);
++        if (publicKey?.length !== 32 || !Number.isInteger(keyId)) return null;
++        preKey = { keyId, publicKey: (0, crypto_1.generateSignalPubKey)(publicKey) };
++    }
++    return {
++        registrationId,
++        identityKey: (0, crypto_1.generateSignalPubKey)(identity),
++        signedPreKey: { keyId: signedId, publicKey: (0, crypto_1.generateSignalPubKey)(signedPublic), signature },
++        preKey
++    };
++};
++exports.extractE2ESessionFromRetryReceipt = extractE2ESessionFromRetryReceipt;
+ const extractDeviceJids = (result, myJid, excludeZeroDevices) => {
+     const { user: myUser, device: myDevice } = (0, WABinary_1.jidDecode)(myJid);
