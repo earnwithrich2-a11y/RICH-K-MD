@@ -2,6 +2,7 @@ const pino = require('pino');
 const NodeCache = require('node-cache');
 const { makeCacheableSignalKeyStore } = require('gifted-baileys');
 const { cachedGroupMetadata } = require('./groupCache');
+const { prepareSelfChatRecipients } = require('./selfChatTransport');
 
 const _userDevicesCache = new NodeCache({ stdTTL: 1800, useClones: false });
 
@@ -28,7 +29,7 @@ const createSocketConfig = (version, state, logger) => {
         generateHighQualityLinkPreview: false,
         getMessage: async () => undefined,
         emitOwnEvents: true,
-        patchMessageBeforeSending: (message) => {
+        patchMessageBeforeSending: (message, jids) => {
             const requiresPatch = !!(
                 message.buttonsMessage ||
                 message.templateMessage ||
@@ -47,7 +48,7 @@ const createSocketConfig = (version, state, logger) => {
                     },
                 };
             }
-            return message;
+            return prepareSelfChatRecipients(message, jids, state.creds.me);
         }
     };
 };
