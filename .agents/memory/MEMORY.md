@@ -1,1 +1,2 @@
 - [Self-chat decryption verification](self-chat-decryption.md) — connection and send success do not prove phone-side decryption; preserve the active login during investigation.
+- [WhatsApp library lag](whatsapp-library-lag.md) — the latest published fork can still omit upstream retry fixes; compare behavior before replacing the login.
