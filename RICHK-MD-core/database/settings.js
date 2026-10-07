@@ -36,7 +36,7 @@ const DEFAULT_SETTINGS = {
     BOT_NAME: "RICHK-MD",
     FOOTER: "Powered by RICHK-MD",
     CAPTION: "© 2026 RICHK-MD",
-    BOT_PIC: "https://files.gifted.co.ke/image/u90mimage.jpg",
+    BOT_PIC: "RICHK-MD-core/rich-k-logo.png",
     VERSION: packageJson.version || "5.0.0",
     MODE: config.MODE || "public",
     BOT_PAUSED: "false",

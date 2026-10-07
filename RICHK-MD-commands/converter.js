@@ -1,6 +1,7 @@
 const { gmd, toAudio, toVideo, toPtt, stickerToImage, gmdFancy, gmdRandom, getSetting, runFFmpeg, getVideoDuration, gmdSticker } = require("../RICHK-MD-core");
 const fs = require("fs").promises;
 const { StickerTypes } = require("wa-sticker-formatter");
+const { logoThumbnail } = require("../RICHK-MD-core/botLogo");
 
 gmd({
     pattern: "sticker",
@@ -193,7 +194,7 @@ gmd({
           title: 'Converted Audio',
           body: 'Video to Audio',
           mediaType: 1,
-          thumbnailUrl: botPic,
+          ...(await logoThumbnail(botPic)),
           sourceUrl: newsletterUrl,
           renderLargerThumbnail: false,
           showAdAttribution: true,

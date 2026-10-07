@@ -1,4 +1,5 @@
 const { getSetting } = require("./database/settings");
+const { BOT_LOGO, logoThumbnail } = require("./botLogo");
 
 const originalConsoleInfo = console.info;
 const originalConsoleLog = console.log;
@@ -79,7 +80,7 @@ const createContext = async (userJid, options = {}) => {
     const botName = (await getSetting("BOT_NAME")) || "RICHK-MD";
     const botPic =
         (await getSetting("BOT_PIC")) ||
-        "https://gitcdn.gifted.co.ke/image/AZO_image.jpg";
+        BOT_LOGO;
     const newsletterJid =
         (await getSetting("NEWSLETTER_JID")) || "120363413613350472@newsletter";
     const newsletterUrl =
@@ -102,11 +103,9 @@ const createContext = async (userJid, options = {}) => {
             externalAdReply: {
                 title: options.title || botName,
                 body: options.body || "Powered by RICHK-MD",
-                ...(options.thumbnail
-                    ? { thumbnail: options.thumbnail }
-                    : { thumbnailUrl: botPic }),
+                ...(await logoThumbnail(botPic, options.thumbnail)),
                 mediaType: 1,
-                mediaUrl: options.mediaUrl || botPic,
+                mediaUrl: options.mediaUrl || (/^https?:\/\//i.test(botPic) ? botPic : newsletterUrl),
                 sourceUrl: options.sourceUrl || newsletterUrl,
                 showAdAttribution: true,
                 renderLargerThumbnail: false,
@@ -119,7 +118,7 @@ const createContext2 = async (userJid, options = {}) => {
     const botName = (await getSetting("BOT_NAME")) || "RICHK-MD";
     const botPic =
         (await getSetting("BOT_PIC")) ||
-        "https://gitcdn.gifted.co.ke/image/AZO_image.jpg";
+        BOT_LOGO;
     const newsletterJid =
         (await getSetting("NEWSLETTER_JID")) || "120363413613350472@newsletter";
 
@@ -136,7 +135,7 @@ const createContext2 = async (userJid, options = {}) => {
             externalAdReply: {
                 title: options.title || botName,
                 body: options.body || "Powered by RICHK-MD",
-                thumbnailUrl: botPic,
+                ...(await logoThumbnail(botPic, options.thumbnail)),
                 mediaType: 1,
                 showAdAttribution: true,
                 renderLargerThumbnail: true,
