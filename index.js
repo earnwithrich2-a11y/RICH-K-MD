@@ -188,6 +188,7 @@ async function startGifted() {
         let selfRetryTraceUntil = 0;
         const patchMessageBeforeSending = socketConfig.patchMessageBeforeSending;
         socketConfig.patchMessageBeforeSending = (message, jids) => {
+            const patched = patchMessageBeforeSending(message, jids);
             const destination = jidDecode(message?.deviceSentMessage?.destinationJid);
             const mePhone = jidDecode(state.creds.me?.id);
             const meLid = jidDecode(state.creds.me?.lid);
@@ -195,7 +196,10 @@ async function startGifted() {
                 (destination?.server === "lid" && destination.user === meLid?.user) ||
                 (destination?.server === "s.whatsapp.net" && destination.user === mePhone?.user);
             if (isOwnDestination || Date.now() < selfRetryTraceUntil) {
-                const targets = (jids || []).map(jidDecode).filter(Boolean);
+                const relayJids = Array.isArray(patched)
+                    ? patched.map((item) => item.recipientJid)
+                    : jids || [];
+                const targets = relayJids.map(jidDecode).filter(Boolean);
                 const ownPhone = targets.filter(
                     (target) => target.server === "s.whatsapp.net" && target.user === mePhone?.user,
                 ).length;
@@ -211,7 +215,7 @@ async function startGifted() {
                     `[WhatsApp] Own relay targets: payload=${destination ? "own-device-copy" : "direct"}; destination=${route}; primary=${primary}; companion=${targets.length - primary}; ownPhone=${ownPhone}; ownLid=${ownLid}; other=${targets.length - ownPhone - ownLid}; lidParsingMatches=${lidParsingMatches}.`,
                 );
             }
-            return patchMessageBeforeSending(message, jids);
+            return patched;
         };
         socketConfig.getMessage = async (key) => {
             const result = await findMessageForRetryWithWait(
@@ -237,7 +241,7 @@ async function startGifted() {
         };
 
         Gifted = giftedConnect(socketConfig);
-        persistOwnOutgoingMessages(Gifted, store);
+        persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
         store.bind(Gifted.ev);
 
         Gifted.ev.process(async (events) => {
