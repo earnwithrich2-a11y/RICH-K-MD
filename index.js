@@ -139,7 +139,14 @@ logger.level = "silent";
 app.use(express.static("RICHK-MD-core"));
 app.get("/", (req, res) => res.sendFile(__dirname + "/RICHK-MD-core/richk-md.html"));
 app.get("/health", (req, res) =>
-    res.status(200).json({ status: "alive", uptime: process.uptime() }),
+    res.status(200).json({
+        status: "alive",
+        uptime: process.uptime(),
+        whatsapp: {
+            connected: Gifted?.ws?.isOpen === true,
+            bufferingMessages: Gifted?.ev?.isBuffering?.() === true,
+        },
+    }),
 );
 app.listen(PORT, () => console.log(`✅ Server Running on Port: ${PORT}`));
 
@@ -705,8 +712,7 @@ const processedMessages = new Set();
 const BOT_START_TIME = Date.now();
 
 function setupCommandHandler(Gifted) {
-    Gifted.ev.on("messages.upsert", async ({ messages, type }) => {
-        const ms = messages[0];
+    const handleMessage = async (ms, type) => {
         if (!ms?.key) return;
         if (!ms.message) {
             if (ms.messageStubType !== undefined) {
@@ -952,6 +958,15 @@ function setupCommandHandler(Gifted) {
                 } catch (sendErr) {
                     console.error("Error sending error message:", sendErr);
                 }
+            }
+        }
+    };
+    Gifted.ev.on("messages.upsert", async ({ messages = [], type }) => {
+        for (const ms of messages) {
+            try {
+                await handleMessage(ms, type);
+            } catch {
+                console.error("[WhatsApp] Message handler failed; continuing with remaining messages.");
             }
         }
     });

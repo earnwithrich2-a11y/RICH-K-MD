@@ -79,3 +79,44 @@ diff --git a/node_modules/gifted-baileys/lib/Utils/signal.js b/node_modules/gift
 +exports.extractE2ESessionFromRetryReceipt = extractE2ESessionFromRetryReceipt;
  const extractDeviceJids = (result, myJid, excludeZeroDevices) => {
      const { user: myUser, device: myDevice } = (0, WABinary_1.jidDecode)(myJid);
+diff --git a/node_modules/gifted-baileys/lib/Socket/socket.js b/node_modules/gifted-baileys/lib/Socket/socket.js
+--- a/node_modules/gifted-baileys/lib/Socket/socket.js
++++ b/node_modules/gifted-baileys/lib/Socket/socket.js
+@@ -542,5 +542,29 @@
+         }
+     });
+-    let didStartBuffer = false;
++    let didStartBuffer = false;
++    let initialBufferTimeout;
++    const finishInitialBuffer = () => {
++        if (!didStartBuffer) return;
++        didStartBuffer = false;
++        clearTimeout(initialBufferTimeout);
++        initialBufferTimeout = undefined;
++        ev.flush();
++    };
++    ev.on('connection.update', ({ connection }) => {
++        if (connection === 'open' && didStartBuffer && !initialBufferTimeout) {
++            initialBufferTimeout = setTimeout(() => {
++                initialBufferTimeout = undefined;
++                if (didStartBuffer) {
++                    logger.warn('Initial notification wait timed out; releasing startup message events');
++                    finishInitialBuffer();
++                }
++            }, 30000);
++            initialBufferTimeout.unref?.();
++        } else if (connection === 'close') {
++            clearTimeout(initialBufferTimeout);
++            initialBufferTimeout = undefined;
++            didStartBuffer = false;
++        }
++    });
+     process.nextTick(() => {
+         var _a;
+@@ -559,5 +583,5 @@
+         logger.info(`handled ${offlineNotifs} offline messages/notifications`);
+         if (didStartBuffer) {
+-            ev.flush();
++            finishInitialBuffer();
+             logger.trace('flushed events for initial buffer');
+         }
