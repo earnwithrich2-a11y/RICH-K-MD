@@ -36,7 +36,7 @@ services:
         scopes:
           - region:was
       - key: TIME_ZONE
-        value: Africa/Nairobi
+        value: Africa/Accra
         scopes:
           - region:was
       - key: AUTO_LIKE_STATUS

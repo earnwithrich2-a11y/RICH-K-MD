@@ -20,7 +20,7 @@ restartPolicyMaxRetries = 5
 #
 #    SESSION_ID   = <your RICHK-MD session id>
 #    MODE         = public
-#    TIME_ZONE    = Africa/Nairobi
+#    TIME_ZONE    = Africa/Accra
 #    AUTO_LIKE_STATUS = true
 #    AUTO_READ_STATUS = true
 #

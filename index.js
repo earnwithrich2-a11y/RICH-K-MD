@@ -2,6 +2,7 @@ require("events").EventEmitter.defaultMaxListeners = 960;
 require("./RICHK-MD-core/gmdHelpers");
 
 const smokeTestMode = process.env.BOT_SMOKE_TEST === "1";
+const { canShowCurrentChannelJid } = require("./RICHK-MD-core/connection/channelJid");
 
 const {
     default: giftedConnect,
@@ -92,6 +93,7 @@ const {
 } = require('./RICHK-MD-core/connection/antiDeleteRecovery');
 const { findMessageForRetryWithWait } = require('./RICHK-MD-core/connection/messageRetry');
 const { persistOwnOutgoingMessages } = require('./RICHK-MD-core/connection/outgoingMessageStore');
+const { trackSelfChatDelivery } = require('./RICHK-MD-core/connection/selfChatDelivery');
 const config = require("./config");
 const googleTTS = require("google-tts-api");
 const fs = require("fs-extra");
@@ -137,7 +139,14 @@ logger.level = "silent";
 app.use(express.static("RICHK-MD-core"));
 app.get("/", (req, res) => res.sendFile(__dirname + "/RICHK-MD-core/richk-md.html"));
 app.get("/health", (req, res) =>
-    res.status(200).json({ status: "alive", uptime: process.uptime() }),
+    res.status(200).json({
+        status: "alive",
+        uptime: process.uptime(),
+        whatsapp: {
+            connected: Gifted?.ws?.isOpen === true,
+            bufferingMessages: Gifted?.ev?.isBuffering?.() === true,
+        },
+    }),
 );
 app.listen(PORT, () => console.log(`✅ Server Running on Port: ${PORT}`));
 
@@ -188,6 +197,7 @@ async function startGifted() {
         let selfRetryTraceUntil = 0;
         const patchMessageBeforeSending = socketConfig.patchMessageBeforeSending;
         socketConfig.patchMessageBeforeSending = (message, jids) => {
+            const patched = patchMessageBeforeSending(message, jids);
             const destination = jidDecode(message?.deviceSentMessage?.destinationJid);
             const mePhone = jidDecode(state.creds.me?.id);
             const meLid = jidDecode(state.creds.me?.lid);
@@ -195,7 +205,10 @@ async function startGifted() {
                 (destination?.server === "lid" && destination.user === meLid?.user) ||
                 (destination?.server === "s.whatsapp.net" && destination.user === mePhone?.user);
             if (isOwnDestination || Date.now() < selfRetryTraceUntil) {
-                const targets = (jids || []).map(jidDecode).filter(Boolean);
+                const relayJids = Array.isArray(patched)
+                    ? patched.map((item) => item.recipientJid)
+                    : jids || [];
+                const targets = relayJids.map(jidDecode).filter(Boolean);
                 const ownPhone = targets.filter(
                     (target) => target.server === "s.whatsapp.net" && target.user === mePhone?.user,
                 ).length;
@@ -211,7 +224,7 @@ async function startGifted() {
                     `[WhatsApp] Own relay targets: payload=${destination ? "own-device-copy" : "direct"}; destination=${route}; primary=${primary}; companion=${targets.length - primary}; ownPhone=${ownPhone}; ownLid=${ownLid}; other=${targets.length - ownPhone - ownLid}; lidParsingMatches=${lidParsingMatches}.`,
                 );
             }
-            return patchMessageBeforeSending(message, jids);
+            return patched;
         };
         socketConfig.getMessage = async (key) => {
             const result = await findMessageForRetryWithWait(
@@ -237,7 +250,8 @@ async function startGifted() {
         };
 
         Gifted = giftedConnect(socketConfig);
-        persistOwnOutgoingMessages(Gifted, store);
+        persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
+        trackSelfChatDelivery(Gifted);
         store.bind(Gifted.ev);
 
         Gifted.ev.process(async (events) => {
@@ -291,7 +305,7 @@ async function startGifted() {
 𝐏𝐥𝐮𝐠𝐢𝐧𝐬      : *${totalCommands}*
 𝐌𝐨𝐝𝐞        : *${md}*
 𝐎𝐰𝐧𝐞𝐫       : *${s.OWNER_NUMBER || d.OWNER_NUMBER}*
-𝐖𝐞𝐛𝐬𝐢𝐭𝐞      : *https://rivo-skills.everyshop.space*
+𝐖𝐞𝐛𝐬𝐢𝐭𝐞      : *https://richkaurex.site*
 𝐔𝐩𝐝𝐚𝐭𝐞𝐬      : *${s.NEWSLETTER_URL || d.NEWSLETTER_URL}*
 
 𝐍𝐨𝐭𝐞:  Bot may take some few seconds/minutes to sync before being ready to use.
@@ -698,8 +712,7 @@ const processedMessages = new Set();
 const BOT_START_TIME = Date.now();
 
 function setupCommandHandler(Gifted) {
-    Gifted.ev.on("messages.upsert", async ({ messages, type }) => {
-        const ms = messages[0];
+    const handleMessage = async (ms, type) => {
         if (!ms?.key) return;
         if (!ms.message) {
             if (ms.messageStubType !== undefined) {
@@ -802,16 +815,19 @@ function setupCommandHandler(Gifted) {
             gmd?.pattern === "pause" && isSuperUser;
         if (botPaused && !isOwnerPauseCommand) return;
 
+        const isCurrentChannelJid =
+            isCommand && canShowCurrentChannelJid(from, gmd?.pattern, args.join(" "));
         const commandAllowed =
             gmd &&
             !(
                 settings.MODE?.toLowerCase() === "private" &&
-                !isSuperUser
+                !isSuperUser &&
+                !isCurrentChannelJid
             );
 
         if (commandAllowed && !canReactImmediately) startCommandReaction();
 
-        if (settings.AUTO_BLOCK && sender && !isSuperUser && !isGroup) {
+        if (settings.AUTO_BLOCK && sender && !isSuperUser && !isGroup && !isCurrentChannelJid) {
             const countryCodes = settings.AUTO_BLOCK.split(",").map((code) =>
                 code.trim(),
             );
@@ -885,7 +901,7 @@ function setupCommandHandler(Gifted) {
         if (isCommand && command) {
             if (!gmd) return;
 
-            if (settings.MODE?.toLowerCase() === "private" && !isSuperUser)
+            if (settings.MODE?.toLowerCase() === "private" && !isSuperUser && !isCurrentChannelJid)
                 return;
 
             try {
@@ -942,6 +958,15 @@ function setupCommandHandler(Gifted) {
                 } catch (sendErr) {
                     console.error("Error sending error message:", sendErr);
                 }
+            }
+        }
+    };
+    Gifted.ev.on("messages.upsert", async ({ messages = [], type }) => {
+        for (const ms of messages) {
+            try {
+                await handleMessage(ms, type);
+            } catch {
+                console.error("[WhatsApp] Message handler failed; continuing with remaining messages.");
             }
         }
     });
