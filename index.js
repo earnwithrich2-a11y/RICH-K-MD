@@ -2,6 +2,7 @@ require("events").EventEmitter.defaultMaxListeners = 960;
 require("./RICHK-MD-core/gmdHelpers");
 
 const smokeTestMode = process.env.BOT_SMOKE_TEST === "1";
+const { canShowCurrentChannelJid } = require("./RICHK-MD-core/connection/channelJid");
 
 const {
     default: giftedConnect,
@@ -806,16 +807,19 @@ function setupCommandHandler(Gifted) {
             gmd?.pattern === "pause" && isSuperUser;
         if (botPaused && !isOwnerPauseCommand) return;
 
+        const isCurrentChannelJid =
+            isCommand && canShowCurrentChannelJid(from, gmd?.pattern, args.join(" "));
         const commandAllowed =
             gmd &&
             !(
                 settings.MODE?.toLowerCase() === "private" &&
-                !isSuperUser
+                !isSuperUser &&
+                !isCurrentChannelJid
             );
 
         if (commandAllowed && !canReactImmediately) startCommandReaction();
 
-        if (settings.AUTO_BLOCK && sender && !isSuperUser && !isGroup) {
+        if (settings.AUTO_BLOCK && sender && !isSuperUser && !isGroup && !isCurrentChannelJid) {
             const countryCodes = settings.AUTO_BLOCK.split(",").map((code) =>
                 code.trim(),
             );
@@ -889,7 +893,7 @@ function setupCommandHandler(Gifted) {
         if (isCommand && command) {
             if (!gmd) return;
 
-            if (settings.MODE?.toLowerCase() === "private" && !isSuperUser)
+            if (settings.MODE?.toLowerCase() === "private" && !isSuperUser && !isCurrentChannelJid)
                 return;
 
             try {
