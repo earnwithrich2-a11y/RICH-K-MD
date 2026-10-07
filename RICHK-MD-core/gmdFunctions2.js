@@ -8,13 +8,13 @@ const { isJidGroup, downloadMediaMessage } = require("gifted-baileys");
 
 
 
-const formatTime = (timestamp, timeZone = 'Africa/Nairobi') => {
+const formatTime = (timestamp, timeZone = 'Africa/Accra') => {
     const date = new Date(timestamp);
     const options = { hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: true, timeZone };
     return new Intl.DateTimeFormat('en-US', options).format(date);
 };
 
-const formatDate = (timestamp, timeZone = 'Africa/Nairobi') => {
+const formatDate = (timestamp, timeZone = 'Africa/Accra') => {
     const date = new Date(timestamp);
     const options = { day: '2-digit', month: '2-digit', year: 'numeric', timeZone };
     return new Intl.DateTimeFormat('en-GB', options).format(date); 
@@ -817,7 +817,7 @@ const GiftedAntiDelete = async (Gifted, deletedMsg, key, deleter, sender, botOwn
     const botPic = settings.BOT_PIC || '';
     const botFooter = settings.FOOTER || '';
     const antiDelete = settings.ANTIDELETE || 'indm';
-    const timeZone = settings.TIME_ZONE || 'Africa/Nairobi';
+    const timeZone = settings.TIME_ZONE || 'Africa/Accra';
 
     const context = await createContext(deleter, {
         title: "Anti-Delete",
@@ -1246,7 +1246,7 @@ const GiftedAntiEdit = async (Gifted, updateData, findOriginal) => {
             : resolvedChatJid?.split('@')[0] || 'Unknown';
 
         const botFooter = settings.FOOTER || '';
-        const timeZone = settings.TIME_ZONE || 'Africa/Nairobi';
+        const timeZone = settings.TIME_ZONE || 'Africa/Accra';
 
         let chatLabel = isGroup ? resolvedChatJid : 'DM';
         if (isGroup) {
