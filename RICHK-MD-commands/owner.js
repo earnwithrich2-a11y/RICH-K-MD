@@ -303,7 +303,7 @@ gmd(
         let formattedDate = "Not Available";
         if (setAt && setAt !== "Not Available") {
           try {
-            const tz = timeZone || "Africa/Nairobi";
+            const tz = timeZone || "Africa/Accra";
             formattedDate = moment(setAt)
               .tz(tz)
               .format("dddd, MMMM Do YYYY, h:mm A z");
@@ -1143,7 +1143,7 @@ gmd(
         forwardingScore: 1,
         isForwarded: true,
         forwardedNewsletterMessageInfo: {
-          newsletterJid: newsletterJid || "120363426409647211@newsletter",
+          newsletterJid: newsletterJid || "120363413613350472@newsletter",
           newsletterName: sourceName,
           serverMessageId: -1,
         },
@@ -1777,17 +1777,25 @@ gmd(
     pattern: "jid",
     react: "👑",
     category: "owner",
-    description: "Get User/Group JID",
+    description: "Get user/group/channel JID; bare .jid displays the current channel ID",
   },
   async (from, Gifted, conText) => {
     const { q, mek, reply, react, isGroup, isSuperUser, quotedUser, botFooter } = conText;
-    const { getLidMapping } = require("../RICHK-MD-core/connection/groupCache");
-    const { sendButtons } = require("gifted-btns");
+    const { canShowCurrentChannelJid } = require("../RICHK-MD-core/connection/channelJid");
+
+    if (canShowCurrentChannelJid(from, "jid", q)) {
+      return Gifted.sendMessage(from, {
+        text: `*Channel JID*\n\n\`\`\`${from}\`\`\``,
+      });
+    }
 
     if (!isSuperUser) {
       await react("❌");
       return reply("❌ Owner Only Command!");
     }
+
+    const { getLidMapping } = require("../RICHK-MD-core/connection/groupCache");
+    const { sendButtons } = require("gifted-btns");
 
     try {
       let finalResult = null;
