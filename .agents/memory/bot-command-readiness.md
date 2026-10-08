@@ -14,3 +14,9 @@ An early clear buffer does not establish lasting readiness: the post-notificatio
 **Why:** A later inactive report showed an authenticated connection buffering messages again minutes after an initially healthy check. The fork also has an unbounded missing-app-key wait, including when history downloads are disabled.
 
 **How to apply:** Check both synchronization phases. Bound each owned wait separately; duplicate markers must not create new holds, and late key delivery must finish its wait even if the account previously completed an initial sync. Do not reset the login or force-flush unrelated operations to resolve this.
+
+Keep live message delivery independent of background SDK event batching. For this bot, passive phone-account mirroring must not gate commands.
+
+**Why:** Bounded startup recovery was followed by repeated no-response reports with buffering active again. Timers address individual waits, not every long-running buffered operation. The bot does not need passive contact/archive/history mirroring to receive live commands.
+
+**How to apply:** Preserve encryption, authenticated key-share processing, retries, and all command permissions. Deliver live messages and their edits/deletions/receipts without waiting for history or account-state batches; prevent later batch completion from replaying commands. Preserve explicit account-state actions where needed. Verify the dependency honors this configuration, not merely that the socket connected.

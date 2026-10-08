@@ -144,7 +144,10 @@ app.get("/health", (req, res) =>
         uptime: process.uptime(),
         whatsapp: {
             connected: Gifted?.ws?.isOpen === true,
-            bufferingMessages: Gifted?.ev?.isBuffering?.() === true,
+            bufferingMessages: (Gifted?.ev?.isBufferingLiveMessages
+                ? Gifted.ev.isBufferingLiveMessages()
+                : Gifted?.ev?.isBuffering?.()) === true,
+            bufferingBackgroundEvents: Gifted?.ev?.isBuffering?.() === true,
         },
     }),
 );
@@ -952,6 +955,7 @@ function setupCommandHandler(Gifted) {
                 });
 
                 await gmd.function(from, Gifted, conText);
+                console.info("[WhatsApp] Command handler completed.");
             } catch (error) {
                 console.error(`Command error [${command}]:`, error);
                 try {

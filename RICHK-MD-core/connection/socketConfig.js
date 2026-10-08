@@ -23,6 +23,8 @@ const createSocketConfig = (version, state, logger) => {
         fireInitQueries: true,
         markOnlineOnConnect: true,
         syncFullHistory: false,
+        syncAppState: false,
+        bufferLiveMessages: false,
         shouldSyncHistoryMessage: () => false,
         retryRequestDelayMs: 250,
         maxMsgRetryCount: 5,
