@@ -1,3 +1,211 @@
+diff --git a/node_modules/gifted-baileys/lib/Utils/auth-utils.js b/node_modules/gifted-baileys/lib/Utils/auth-utils.js
+--- a/node_modules/gifted-baileys/lib/Utils/auth-utils.js
++++ b/node_modules/gifted-baileys/lib/Utils/auth-utils.js
+@@ -53,6 +53,8 @@
+             return data;
+         },
+         async set(data) {
++            // Publish cached keys only after durable storage accepts them.
++            await store.set(data);
+             let keys = 0;
+             for (const type in data) {
+                 for (const id in data[type]) {
+@@ -61,7 +63,6 @@
+                 }
+             }
+             logger === null || logger === void 0 ? void 0 : logger.trace({ keys }, 'updated cache');
+-            await store.set(data);
+         },
+         async clear() {
+             var _a;
+@@ -78,100 +79,9 @@
+  * @returns SignalKeyStore with transaction capability
+  */
+ const addTransactionCapability = (state, logger, { maxCommitRetries, delayBetweenTriesMs }) => {
+-    // number of queries made to the DB during the transaction
+-    // only there for logging purposes
+-    let dbQueriesInTransaction = 0;
+-    let transactionCache = {};
+-    let mutations = {};
+-    let transactionsInProgress = 0;
+-    return {
+-        get: async (type, ids) => {
+-            if (isInTransaction()) {
+-                const dict = transactionCache[type];
+-                const idsRequiringFetch = dict ? ids.filter(item => typeof dict[item] === 'undefined') : ids;
+-                // only fetch if there are any items to fetch
+-                if (idsRequiringFetch.length) {
+-                    dbQueriesInTransaction += 1;
+-                    const result = await state.get(type, idsRequiringFetch);
+-                    transactionCache[type] || (transactionCache[type] = {});
+-                    Object.assign(transactionCache[type], result);
+-                }
+-                return ids.reduce((dict, id) => {
+-                    var _a;
+-                    const value = (_a = transactionCache[type]) === null || _a === void 0 ? void 0 : _a[id];
+-                    if (value) {
+-                        dict[id] = value;
+-                    }
+-                    return dict;
+-                }, {});
+-            }
+-            else {
+-                return state.get(type, ids);
+-            }
+-        },
+-        set: data => {
+-            if (isInTransaction()) {
+-                logger.trace({ types: Object.keys(data) }, 'caching in transaction');
+-                for (const key in data) {
+-                    transactionCache[key] = transactionCache[key] || {};
+-                    Object.assign(transactionCache[key], data[key]);
+-                    mutations[key] = mutations[key] || {};
+-                    Object.assign(mutations[key], data[key]);
+-                }
+-            }
+-            else {
+-                return state.set(data);
+-            }
+-        },
+-        isInTransaction,
+-        async transaction(work) {
+-            let result;
+-            transactionsInProgress += 1;
+-            if (transactionsInProgress === 1) {
+-                logger.trace('entering transaction');
+-            }
+-            try {
+-                result = await work();
+-                // commit if this is the outermost transaction
+-                if (transactionsInProgress === 1) {
+-                    if (Object.keys(mutations).length) {
+-                        logger.trace('committing transaction');
+-                        // retry mechanism to ensure we've some recovery
+-                        // in case a transaction fails in the first attempt
+-                        let tries = maxCommitRetries;
+-                        while (tries) {
+-                            tries -= 1;
+-                            //eslint-disable-next-line max-depth
+-                            try {
+-                                await state.set(mutations);
+-                                logger.trace({ dbQueriesInTransaction }, 'committed transaction');
+-                                break;
+-                            }
+-                            catch (error) {
+-                                logger.warn(`failed to commit ${Object.keys(mutations).length} mutations, tries left=${tries}`);
+-                                await (0, generics_1.delay)(delayBetweenTriesMs);
+-                            }
+-                        }
+-                    }
+-                    else {
+-                        logger.trace('no mutations in transaction');
+-                    }
+-                }
+-            }
+-            finally {
+-                transactionsInProgress -= 1;
+-                if (transactionsInProgress === 0) {
+-                    transactionCache = {};
+-                    mutations = {};
+-                    dbQueriesInTransaction = 0;
+-                }
+-            }
+-            return result;
+-        }
+-    };
+-    function isInTransaction() {
+-        return transactionsInProgress > 0;
+-    }
++    return require("./signal-transactions").isolatedSignalTransactions(state, logger, {
++        maxCommitRetries, delayBetweenTriesMs
++    });
+ };
+ exports.addTransactionCapability = addTransactionCapability;
+ const initAuthCreds = () => {
+diff --git a/node_modules/gifted-baileys/lib/Utils/crypto.js b/node_modules/gifted-baileys/lib/Utils/crypto.js
+--- a/node_modules/gifted-baileys/lib/Utils/crypto.js
++++ b/node_modules/gifted-baileys/lib/Utils/crypto.js
+@@ -71,8 +71,7 @@
+     sign: (privateKey, buf) => libsignal.curve.calculateSignature(privateKey, buf),
+     verify: (pubKey, message, signature) => {
+         try {
+-            libsignal.curve.verifySignature((0, exports.generateSignalPubKey)(pubKey), message, signature);
+-            return true;
++            return libsignal.curve.verifySignature((0, exports.generateSignalPubKey)(pubKey), message, signature) !== false;
+         }
+         catch (error) {
+             return false;
+diff --git a/node_modules/gifted-baileys/lib/Utils/signal-transactions.js b/node_modules/gifted-baileys/lib/Utils/signal-transactions.js
+new file mode 100644
+--- /dev/null
++++ b/node_modules/gifted-baileys/lib/Utils/signal-transactions.js
+@@ -0,0 +1,66 @@
++"use strict";
++const { AsyncLocalStorage } = require("node:async_hooks");
++const { makeMutex } = require("./make-mutex");
++
++// One key store has one commit boundary. Crypto operations may nest, but
++// unrelated async callers must never share a cache, mutations or commit.
++function isolatedSignalTransactions(state, logger, options) {
++    const contexts = new AsyncLocalStorage();
++    const lock = makeMutex();
++    const context = () => {
++        const value = contexts.getStore();
++        return value?.active ? value : undefined;
++    };
++    const attempts = Math.max(1, options.maxCommitRetries || 1);
++    async function commit(mutations) {
++        if (!Object.keys(mutations).length) return;
++        for (let attempt = 0; attempt < attempts; attempt++) {
++            try {
++                await state.set(mutations);
++                return;
++            } catch (error) {
++                if (attempt === attempts - 1) throw error;
++                logger.warn("Signal key commit failed; retrying.");
++                await new Promise(resolve => setTimeout(resolve, options.delayBetweenTriesMs || 0));
++            }
++        }
++    }
++    return {
++        async get(type, ids) {
++            const current = context();
++            if (!current) return state.get(type, ids);
++            const cached = current.cache[type] || (current.cache[type] = {});
++            const missing = ids.filter(id => !Object.prototype.hasOwnProperty.call(cached, id));
++            if (missing.length) {
++                const fetched = await state.get(type, missing);
++                // Remember absent keys too, including explicit deletions.
++                for (const id of missing) cached[id] = fetched[id];
++            }
++            return Object.fromEntries(ids.filter(id => cached[id] != null).map(id => [id, cached[id]]));
++        },
++        async set(data) {
++            const current = context();
++            if (!current) return lock.mutex(() => state.set(data));
++            for (const [type, values] of Object.entries(data)) {
++                Object.assign(current.cache[type] || (current.cache[type] = {}), values);
++                Object.assign(current.mutations[type] || (current.mutations[type] = {}), values);
++            }
++        },
++        isInTransaction() { return Boolean(context()); },
++        async transaction(work) {
++            if (context()) return work();
++            return lock.mutex(async () => {
++                const current = { active: true, cache: {}, mutations: {} };
++                try {
++                    const result = await contexts.run(current, work);
++                    current.active = false;
++                    await commit(current.mutations);
++                    return result;
++                } finally {
++                    current.active = false;
++                }
++            });
++        },
++    };
++}
++exports.isolatedSignalTransactions = isolatedSignalTransactions;
 diff --git a/node_modules/gifted-baileys/lib/Socket/messages-recv.js b/node_modules/gifted-baileys/lib/Socket/messages-recv.js
 --- a/node_modules/gifted-baileys/lib/Socket/messages-recv.js
 +++ b/node_modules/gifted-baileys/lib/Socket/messages-recv.js

@@ -3,4 +3,5 @@
 - [Bot command readiness](bot-command-readiness.md) — check processing queues as well as event buffering; keep retries and background sync off the live-message path.
 - [Social greeting tone](social-greeting-tone.md) — love, goodnight, and goodmorning should send varied sweet text, not one fixed greeting.
 - [Outgoing command routing](outgoing-command-routing.md) — commands sent by the linked bot account to other people's chats should reply there, not in self-chat.
+- [Signal transaction safety](signal-transaction-safety.md) — isolate async crypto operations and commit keys atomically; never trade encryption-state safety for queue speed.
 - [Group URL lock policy](group-url-lock-policy.md) — only group admins and the group owner are exempt; global bot-owner or sudo status is not enough.

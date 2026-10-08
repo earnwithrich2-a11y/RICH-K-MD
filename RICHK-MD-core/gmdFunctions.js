@@ -523,6 +523,16 @@ async function useSQLiteAuthState(databasePath) {
         db.close();
         throw new Error("No usable session credentials. Check SESSION_ID or the session database.");
     }
+    const writeKeys = db.transaction((data) => {
+        for (const category in data) {
+            for (const id in data[category]) {
+                const value = data[category][id];
+                const key = `${category}-${id}`;
+                if (value) writeData(key, value);
+                else removeData(key);
+            }
+        }
+    });
 
     return {
         state: {
@@ -539,17 +549,7 @@ async function useSQLiteAuthState(databasePath) {
                     return data;
                 },
                 set: async (data) => {
-                    for (const category in data) {
-                        for (const id in data[category]) {
-                            const value = data[category][id];
-                            const key = `${category}-${id}`;
-                            if (value) {
-                                writeData(key, value);
-                            } else {
-                                removeData(key);
-                            }
-                        }
-                    }
+                    writeKeys(data);
                 }
             }
         },
