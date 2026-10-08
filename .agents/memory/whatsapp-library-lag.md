@@ -14,3 +14,9 @@ An empty or missing patch directory is not an error to patch-package, even with 
 **Why:** It can report success with no patches found, allowing a clean dependency install to silently lose required protocol and safe-logging fixes.
 
 **How to apply:** Verify required compatibility patches exist before invoking the patch installer. Do not classify them as disposable generated files during asset cleanup.
+
+Extending an already-applied dependency patch can leave mixed applied/unapplied hunks that patch-package rejects.
+
+**Why:** The installer checks the complete patch state; rejection in this situation does not by itself mean the new diff is malformed.
+
+**How to apply:** Bring the installed dependency into agreement with the complete patch using focused incremental edits, then verify installer idempotency and check the patch against a clean published package. Keep authentication data untouched.

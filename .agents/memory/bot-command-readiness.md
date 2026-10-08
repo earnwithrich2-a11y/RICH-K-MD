@@ -8,3 +8,9 @@ Treat WhatsApp authentication, message-event delivery, and phone-side reply decr
 **Why:** The user reported silent commands while the bot was connected, public and unpaused. A live check showed the startup event buffer still active after more than a minute, with no recent message-handler activity. After bounded startup recovery, the live connection remained authenticated and the buffer was no longer active.
 
 **How to apply:** Check event buffering and command reception before recommending another session ID. Startup recovery must release only the buffering level it owns; late or duplicate sync completion must not release unrelated operations. Readable replies on the user's phone remain a separate verification requirement.
+
+An early clear buffer does not establish lasting readiness: the post-notification app-sync wait can start later, independently of the initial connection buffer.
+
+**Why:** A later inactive report showed an authenticated connection buffering messages again minutes after an initially healthy check. The fork also has an unbounded missing-app-key wait, including when history downloads are disabled.
+
+**How to apply:** Check both synchronization phases. Bound each owned wait separately; duplicate markers must not create new holds, and late key delivery must finish its wait even if the account previously completed an initial sync. Do not reset the login or force-flush unrelated operations to resolve this.
