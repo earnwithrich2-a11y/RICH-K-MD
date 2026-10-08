@@ -25,6 +25,7 @@ const createSocketConfig = (version, state, logger) => {
         syncFullHistory: false,
         syncAppState: false,
         bufferLiveMessages: false,
+        prioritizeLiveMessages: true,
         shouldSyncHistoryMessage: () => false,
         retryRequestDelayMs: 250,
         maxMsgRetryCount: 5,

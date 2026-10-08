@@ -20,3 +20,15 @@ Keep live message delivery independent of background SDK event batching. For thi
 **Why:** Bounded startup recovery was followed by repeated no-response reports with buffering active again. Timers address individual waits, not every long-running buffered operation. The bot does not need passive contact/archive/history mirroring to receive live commands.
 
 **How to apply:** Preserve encryption, authenticated key-share processing, retries, and all command permissions. Deliver live messages and their edits/deletions/receipts without waiting for history or account-state batches; prevent later batch completion from replaying commands. Preserve explicit account-state actions where needed. Verify the dependency honors this configuration, not merely that the socket connected.
+
+Verify the processing path before event emission as well as event delivery. Retry network work must not monopolize incoming-message processing.
+
+**Why:** A no-reply report persisted after live event buffering was disabled. Live inspection found a backlog dominated by receipts waiting alongside incoming messages. Also, “offline” is a transport label: messages sent during reconnection can be new rather than historical.
+
+**How to apply:** Keep retry work ordered per requesting device without making other incoming messages wait for it; retain Signal's cryptographic serialization and key validation. Acknowledge received retry packets independently of slow resends. Use trusted timestamps to distinguish fresh reconnect traffic from history, and prevent a failed packet from leaving a queue permanently marked busy.
+
+Distinguish the linked WhatsApp account from the configured bot owner.
+
+**Why:** Owner settings grant command permissions; they do not change the active WhatsApp login. A separate bot account is valid, but self-chat on another account does not reach it.
+
+**How to apply:** Verify masked linked-account metadata and which account the user is testing before attributing missing input to library failures or replacing a login. Do not assume differing owner and bot accounts are themselves a configuration error.

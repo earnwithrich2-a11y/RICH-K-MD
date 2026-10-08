@@ -101,6 +101,21 @@ test("a skipped placeholder or old message cannot hide a later live command", as
     assert.deepEqual(harness.calls, ["live"]);
 });
 
+test("a fresh offline member command reaches the real dispatcher without waiting for receipts", async () => {
+    const ev = makeEventBuffer({ trace() {}, debug() {} }, false);
+    const harness = dispatcherHarness(false, ev);
+    ev.buffer();
+    const fresh = message("offline-command");
+    fresh.key.fromMe = false;
+    ev.emit("messages.upsert", { type: "append", messages: [fresh] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(harness.calls, ["offline-command"]);
+    assert.equal(harness.replies.length, 1);
+    ev.flush();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(harness.calls, ["offline-command"]);
+});
+
 test("one failed message cannot abort the rest of its batch", async () => {
     const harness = dispatcherHarness(true);
     await harness.receive({

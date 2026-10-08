@@ -276,3 +276,40 @@ test("live event wiring enforces original edit IDs once and examines every new m
     assert.equal(moderated[2][1].key.id, "original-message");
     assert.equal(moderated[2][3], true);
 });
+
+test("a fresh offline non-admin link reaches deletion while history and receipts remain buffered", async () => {
+    const { makeEventBuffer } = require("gifted-baileys/lib/Utils/event-buffer");
+    const source = fs.readFileSync(require.resolve("../index"), "utf8");
+    const start = source.indexOf("function setupChatBotAndAntiLink(");
+    const block = source.slice(start, source.indexOf("\nfunction ", start + 1));
+    const context = {
+        require: () => ({ isMessageEdit }),
+        GiftedAntiLink: async (socket, msg) => enforceGroupLinkLock(socket, msg, async () => metadata),
+        getGroupMetadata: async () => metadata,
+        getAllSettings: async () => ({ CHATBOT: "false" }),
+        GiftedAntibad: async () => {}, GiftedAntiGroupMention: async () => {},
+        handleGameMessage: async () => {},
+    };
+    vm.createContext(context);
+    vm.runInContext(block + "\nthis.setup = setupChatBotAndAntiLink;", context);
+    const socket = makeSocket();
+    socket.ev = makeEventBuffer({ trace() {}, debug() {} }, false);
+    context.setup(socket);
+    socket.ev.buffer();
+    const fresh = message();
+    fresh.key.id = "fresh-link";
+    fresh.messageTimestamp = Math.floor(Date.now() / 1000);
+    const historical = message();
+    historical.key.id = "old-link";
+    historical.messageTimestamp = fresh.messageTimestamp - 86400;
+    socket.ev.emit("messages.upsert", { type: "append", messages: [historical, fresh] });
+    await new Promise(resolve => setImmediate(resolve));
+    const deletions = () => socket.sent.filter(([, content]) => content.delete);
+    assert.equal(deletions().length, 1);
+    assert.equal(deletions()[0][1].delete.id, "fresh-link");
+    const sentBeforeHistoryFlush = socket.sent.length;
+    socket.ev.flush();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(deletions().length, 1);
+    assert.equal(socket.sent.length, sentBeforeHistoryFlush);
+});
