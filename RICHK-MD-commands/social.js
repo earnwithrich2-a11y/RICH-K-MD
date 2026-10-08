@@ -1,27 +1,26 @@
 const { gmd } = require("../RICHK-MD-core/gmdCmds");
+const { sweetMessages, createMessagePicker } = require("../RICHK-MD-core/sweetMessages");
 
 const socialReplies = [
   {
     pattern: "love",
     react: "❤️",
-    description: "Send a short love message",
-    text: "❤️ Sending love and good vibes your way!",
+    description: "Send a different sweet love message",
   },
   {
     pattern: "goodnight",
     react: "🌙",
-    description: "Send a good night greeting",
-    text: "🌙 Good night! Rest well and wake up refreshed.",
+    description: "Send a different sweet good night message",
   },
   {
     pattern: "goodmorning",
     react: "🌅",
-    description: "Send a good morning greeting",
-    text: "🌅 Good morning! Wishing you a bright, happy day!",
+    description: "Send a different sweet good morning message",
   },
 ];
 
-for (const { pattern, react, description, text } of socialReplies) {
+for (const { pattern, react, description } of socialReplies) {
+  const pickMessage = createMessagePicker(sweetMessages[pattern]);
   gmd(
     {
       pattern,
@@ -30,7 +29,7 @@ for (const { pattern, react, description, text } of socialReplies) {
       description,
     },
     async (from, Gifted) => {
-      await Gifted.sendMessage(from, { text });
+      await Gifted.sendMessage(from, { text: pickMessage() });
     },
   );
 }
