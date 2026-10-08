@@ -43,11 +43,11 @@ const isExpectedError = (errorMsg) => {
     return expectedErrors.some((e) => errorMsg?.toLowerCase().includes(e));
 };
 
-const getGroupMetadata = async (Gifted, jid) => {
+const getGroupMetadata = async (Gifted, jid, { forceRefresh = false } = {}) => {
     if (!jid || !jid.endsWith("@g.us")) return null;
 
     try {
-        const cached = groupCache.get(jid);
+        const cached = forceRefresh ? null : groupCache.get(jid);
         if (cached) {
             updateLidMappingsFromMetadata(cached);
             return cached;

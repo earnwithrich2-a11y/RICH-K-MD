@@ -1,3 +1,4 @@
 - [Self-chat decryption verification](self-chat-decryption.md) — connection and send success do not prove phone-side decryption; preserve the active login during investigation.
 - [WhatsApp library lag](whatsapp-library-lag.md) — the latest published fork can still omit upstream retry fixes; compare behavior before replacing the login.
 - [Bot command readiness](bot-command-readiness.md) — authenticated WhatsApp connections can still hold command events in a startup buffer; diagnose event delivery before pairing again.
+- [Group URL lock policy](group-url-lock-policy.md) — only group admins and the group owner are exempt; global bot-owner or sudo status is not enough.

@@ -590,6 +590,15 @@ function setupPresence(Gifted) {
 }
 
 function setupChatBotAndAntiLink(Gifted) {
+    const { isMessageEdit } = require("./RICHK-MD-core/groupLinkLock");
+    Gifted.ev.on("messages.update", async (updates) => {
+        for (const update of updates || []) {
+            const edited = update?.update?.message;
+            if (!isMessageEdit(edited)) continue;
+            if (!update.key?.remoteJid?.endsWith("@g.us")) continue;
+            await GiftedAntiLink(Gifted, { key: update.key, message: edited }, getGroupMetadata, true);
+        }
+    });
     Gifted.ev.on("messages.upsert", async ({ messages, type }) => {
         if (type === "append") return;
 
@@ -610,6 +619,8 @@ function setupChatBotAndAntiLink(Gifted) {
 
         for (const message of messages) {
             if (!message?.message) continue;
+            // Edits are enforced once, using messages.update's original message ID.
+            if (isMessageEdit(message.message)) continue;
             const from = message.key?.remoteJid || "";
             if (message.key.fromMe && !from.endsWith("@g.us")) continue;
 
