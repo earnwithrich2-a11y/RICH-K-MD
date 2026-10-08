@@ -120,3 +120,57 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/socket.js b/node_modules/gif
 +            finishInitialBuffer();
              logger.trace('flushed events for initial buffer');
          }
+diff --git a/node_modules/gifted-baileys/lib/Socket/chats.js b/node_modules/gifted-baileys/lib/Socket/chats.js
+--- a/node_modules/gifted-baileys/lib/Socket/chats.js
++++ b/node_modules/gifted-baileys/lib/Socket/chats.js
+@@ -24,2 +24,11 @@
+     let needToFlushWithAppStateSync = false;
++    let didStartAppStateBuffer = false;
++    let appStateBufferTimeout;
++    const finishAppStateBuffer = () => {
++        if (!needToFlushWithAppStateSync) return;
++        needToFlushWithAppStateSync = false;
++        clearTimeout(appStateBufferTimeout);
++        appStateBufferTimeout = undefined;
++        ev.flush();
++    };
+     let pendingAppStateSync = false;
+@@ -782,1 +791,1 @@
+-        if (((_c = (_b = msg.message) === null || _b === void 0 ? void 0 : _b.protocolMessage) === null || _c === void 0 ? void 0 : _c.appStateSyncKeyShare) && pendingAppStateSync) {
++        if (((_c = (_b = msg.message) === null || _b === void 0 ? void 0 : _b.protocolMessage) === null || _c === void 0 ? void 0 : _c.appStateSyncKeyShare) && (pendingAppStateSync || needToFlushWithAppStateSync)) {
+@@ -792,6 +801,3 @@
+-                if (needToFlushWithAppStateSync) {
+-                    logger.debug('flushing with app state sync');
+-                    ev.flush();
+-                }
+             }
++            finishAppStateBuffer();
+         }
+@@ -824,2 +830,8 @@
+         var _a;
++        if (connection === 'close') {
++            clearTimeout(appStateBufferTimeout);
++            appStateBufferTimeout = undefined;
++            needToFlushWithAppStateSync = false;
++            return;
++        }
+         if (connection === 'open') {
+@@ -831,9 +843,14 @@
+-        if (receivedPendingNotifications && // if we don't have the app state key
+-            // we keep buffering events until we finally have
+-            // the key and can sync the messages
+-            // todo scrutinize
++        if (receivedPendingNotifications && !didStartAppStateBuffer &&
+             !((_a = authState.creds) === null || _a === void 0 ? void 0 : _a.myAppStateKeyId)) {
+             ev.buffer();
+             needToFlushWithAppStateSync = true;
++            didStartAppStateBuffer = true;
++            appStateBufferTimeout = setTimeout(() => {
++                if (needToFlushWithAppStateSync) {
++                    logger.warn('App-state key wait timed out; releasing message events');
++                    finishAppStateBuffer();
++                }
++            }, 30000);
++            appStateBufferTimeout.unref?.();
+         }
+     });
