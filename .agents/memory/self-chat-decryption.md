@@ -14,3 +14,9 @@ A fresh self-chat text reply was phone-side confirmed; this is historical eviden
 **Why:** On 2026-10-08, the user explicitly confirmed that sending a new `.ping` in their WhatsApp self-chat produced a readable reply.
 
 **How to apply:** Treat this as evidence for that confirmed flow. Later no-response reports require new runtime checks and a fresh phone-side reply. This confirmation does not establish recovery of older pending messages or delivery of every media, group, or external-service command.
+
+Linked-device retry activity does not by itself prove that the user's phone cannot read replies.
+
+**Why:** The user again confirmed a fresh readable `.ping` after reporting missing replies, while runtime logs contained repeated linked-device retries.
+
+**How to apply:** Use fresh phone-side confirmation for the tested flow, preserve the working login, and identify which device is failing before treating all retry activity as a failure on the user's phone. Do not infer that every linked device or older message has recovered.
