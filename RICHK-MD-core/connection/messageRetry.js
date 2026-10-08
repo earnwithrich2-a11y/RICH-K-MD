@@ -42,6 +42,11 @@ async function findMessageForRetry(store, key, ownJids) {
         ? await store.loadMessage(key.remoteJid, key.id)
         : null;
     if (exact?.message) {
+        // Outgoing retry receipts must never rebroadcast received messages,
+        // even when their ID exists in this chat's shared message cache.
+        if (key.fromMe && exact.key?.fromMe !== true) {
+            return { message: undefined, source: "not-outgoing", isSelfChat };
+        }
         return { message: exact.message, source: "exact", isSelfChat };
     }
 
@@ -78,7 +83,7 @@ async function findMessageForRetry(store, key, ownJids) {
 async function findMessageForRetryWithWait(store, key, ownJids, delays = [50, 150]) {
     let result = await findMessageForRetry(store, key, ownJids);
     for (const delay of delays) {
-        if (result.message || !key?.fromMe) break;
+        if (result.message || result.source === "not-outgoing" || !key?.fromMe) break;
         await new Promise((resolve) => setTimeout(resolve, delay));
         result = await findMessageForRetry(store, key, ownJids);
     }
