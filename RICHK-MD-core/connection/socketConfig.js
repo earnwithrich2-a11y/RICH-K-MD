@@ -17,6 +17,9 @@ const createSocketConfig = (version, state, logger) => {
             keys: makeCacheableSignalKeyStore(state.keys, logger)
         },
         makeSignalRepository: makeAtomicSignalRepository,
+        // Crypto operations commit atomically in the repository. Discovery,
+        // group metadata queries and socket writes must not hold that lock.
+        atomicSignalOperations: true,
         cachedGroupMetadata,
         userDevicesCache: _userDevicesCache,
         connectTimeoutMs: 15000,
