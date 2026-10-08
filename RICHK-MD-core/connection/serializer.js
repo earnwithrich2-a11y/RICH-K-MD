@@ -1,4 +1,4 @@
-const { getContentType, downloadContentFromMessage, downloadMediaMessage } = require('gifted-baileys');
+const { getContentType, normalizeMessageContent, downloadContentFromMessage, downloadMediaMessage } = require('gifted-baileys');
 const { getLidMapping } = require('./groupCache');
 
 const standardizeJid = (jid) => {
@@ -29,15 +29,21 @@ const serializeMessage = async (ms, Gifted, settings = {}) => {
     if (!ms?.message || !ms?.key) return null;
 
     const botId = standardizeJid(Gifted.user?.id);
-    const type = getContentType(ms.message);
+    // Linked-device copies and disappearing/view-once envelopes contain the
+    // actual text inside another message. Keep the original for quoting/media.
+    const content = normalizeMessageContent(ms.message.deviceSentMessage?.message || ms.message);
+    if (!content) return null;
+    const type = getContentType(content);
     const ownLid = standardizeJid(Gifted.authState?.creds?.me?.lid || Gifted.user?.lid);
     const remoteJid = standardizeJid(ms.key.remoteJid);
     const remoteJidAlt = standardizeJid(ms.key.remoteJidAlt);
     const isMessageYourself =
         ms.key.fromMe &&
-        (remoteJid === botId ||
+        ((botId && remoteJid === botId) ||
             (remoteJid.endsWith('@lid') &&
-                (remoteJid === ownLid || remoteJidAlt === botId || remoteJidAlt === ownLid)));
+                ((ownLid && remoteJid === ownLid) ||
+                    (botId && remoteJidAlt === botId) ||
+                    (ownLid && remoteJidAlt === ownLid))));
     const from = isMessageYourself ? botId : remoteJid;
     const isGroup = from.endsWith('@g.us');
     
@@ -49,10 +55,10 @@ const serializeMessage = async (ms, Gifted, settings = {}) => {
     let isButtonResponse = false;
     let buttonId = null;
     
-    if (ms.message?.interactiveResponseMessage) {
+    if (content.interactiveResponseMessage) {
         isButtonResponse = true;
         try {
-            const paramsJson = ms.message.interactiveResponseMessage.nativeFlowResponseMessage?.paramsJson;
+            const paramsJson = content.interactiveResponseMessage.nativeFlowResponseMessage?.paramsJson;
             if (paramsJson) {
                 buttonId = JSON.parse(paramsJson)?.id || null;
             }
@@ -60,53 +66,54 @@ const serializeMessage = async (ms, Gifted, settings = {}) => {
             buttonId = null;
         }
         if (!buttonId) {
-            buttonId = ms.message.interactiveResponseMessage.buttonId || null;
+            buttonId = content.interactiveResponseMessage.buttonId || null;
         }
-        body = buttonId || ms.message.interactiveResponseMessage?.body?.text || '';
-    } else if (ms.message?.buttonsResponseMessage?.selectedButtonId) {
+        body = buttonId || content.interactiveResponseMessage?.body?.text || '';
+    } else if (content.buttonsResponseMessage?.selectedButtonId) {
         isButtonResponse = true;
-        buttonId = ms.message.buttonsResponseMessage.selectedButtonId;
+        buttonId = content.buttonsResponseMessage.selectedButtonId;
         body = buttonId;
-    } else if (ms.message?.listResponseMessage?.singleSelectReply?.selectedRowId) {
+    } else if (content.listResponseMessage?.singleSelectReply?.selectedRowId) {
         isButtonResponse = true;
-        buttonId = ms.message.listResponseMessage.singleSelectReply.selectedRowId;
+        buttonId = content.listResponseMessage.singleSelectReply.selectedRowId;
         body = buttonId;
-    } else if (ms.message?.templateButtonReplyMessage?.selectedId) {
+    } else if (content.templateButtonReplyMessage?.selectedId) {
         isButtonResponse = true;
-        buttonId = ms.message.templateButtonReplyMessage.selectedId;
+        buttonId = content.templateButtonReplyMessage.selectedId;
         body = buttonId;
     } else if (type === 'conversation') {
-        body = ms.message.conversation;
+        body = content.conversation;
     } else if (type === 'extendedTextMessage') {
-        body = ms.message.extendedTextMessage.text;
-    } else if (type === 'imageMessage' && ms.message.imageMessage.caption) {
-        body = ms.message.imageMessage.caption;
-    } else if (type === 'videoMessage' && ms.message.videoMessage.caption) {
-        body = ms.message.videoMessage.caption;
+        body = content.extendedTextMessage.text;
+    } else if (type === 'imageMessage' && content.imageMessage.caption) {
+        body = content.imageMessage.caption;
+    } else if (type === 'videoMessage' && content.videoMessage.caption) {
+        body = content.videoMessage.caption;
     }
+    body = typeof body === 'string' ? body : '';
 
     const botPrefix = settings.PREFIX || '.';
     const isCommand = body.startsWith(botPrefix);
     const command = isCommand ? body.slice(botPrefix.length).trim().split(' ').shift().toLowerCase() : '';
     const args = typeof body === 'string' ? body.trim().split(/\s+/).slice(1) : [];
 
-    const repliedMessage = ms.message?.extendedTextMessage?.contextInfo?.quotedMessage || null;
+    const repliedMessage = content.extendedTextMessage?.contextInfo?.quotedMessage || null;
     const quoted = type == 'extendedTextMessage' && 
-        ms.message.extendedTextMessage.contextInfo != null 
-        ? ms.message.extendedTextMessage.contextInfo.quotedMessage || [] 
+        content.extendedTextMessage.contextInfo != null
+        ? content.extendedTextMessage.contextInfo.quotedMessage || []
         : [];
     
-    const mentionedJid = (ms.message?.extendedTextMessage?.contextInfo?.mentionedJid || []).map(standardizeJid);
-    const tagged = ms.mtype === 'extendedTextMessage' && ms.message.extendedTextMessage.contextInfo != null
-        ? ms.message.extendedTextMessage.contextInfo.mentionedJid
+    const mentionedJid = (content.extendedTextMessage?.contextInfo?.mentionedJid || []).map(standardizeJid);
+    const tagged = type === 'extendedTextMessage' && content.extendedTextMessage.contextInfo != null
+        ? content.extendedTextMessage.contextInfo.mentionedJid
         : [];
     
-    const contextInfo = ms.message?.extendedTextMessage?.contextInfo || 
-        ms.message?.imageMessage?.contextInfo ||
-        ms.message?.videoMessage?.contextInfo ||
-        ms.message?.audioMessage?.contextInfo ||
-        ms.message?.documentMessage?.contextInfo ||
-        ms.message?.stickerMessage?.contextInfo || null;
+    const contextInfo = content.extendedTextMessage?.contextInfo ||
+        content.imageMessage?.contextInfo ||
+        content.videoMessage?.contextInfo ||
+        content.audioMessage?.contextInfo ||
+        content.documentMessage?.contextInfo ||
+        content.stickerMessage?.contextInfo || null;
     
     const quotedMsg = contextInfo?.quotedMessage || null;
     const rawQuotedUser = contextInfo?.participant || contextInfo?.remoteJid;
