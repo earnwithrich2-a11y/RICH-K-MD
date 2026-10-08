@@ -8,3 +8,15 @@ Commands sent by the linked bot account in someone else's chat should reply in t
 **Why:** The user specifically requested this behavior after self-chat replies were confirmed. Self-chat-only checks missed problems with disappearing-message envelopes and missing address metadata.
 
 **How to apply:** Keep command-author identity separate from reply destination. Missing aliases must not count as matching identities; retain genuinely verified alternate self-chat addresses. Exercise real message parsing for outgoing commands in both phone-addressed and LID-addressed chats, in public and private mode. Preserve owner permissions and original message metadata when reading wrapped content.
+
+Retain retry copies of bot-generated messages independently of live message-event delivery, including messages sent to other people's chats.
+
+**Why:** A recipient screenshot showed a readable command followed by unreadable bot messages. Inspection found explicit retry persistence limited to self-chat, and recovery across phone/LID addresses limited to self-chat too. These are recovery gaps, not proof of the initial encryption failure.
+
+**How to apply:** Save outgoing bot messages directly after sending. Alias recovery must prove that the saved message belongs to the same recipient using transport-supplied alternate addresses or verified mappings; a matching message ID alone is insufficient. Never treat outgoing sender metadata as the recipient's identity.
+
+Unavailable retry plaintext must not trigger encryption-session replacement.
+
+**Why:** The installed transport attempted forced session recovery even when no requested message remained available, producing unnecessary session churn during repeated old receipts.
+
+**How to apply:** Check message availability before key injection or forced session fetches. Bound missing-message attempts and preserve current sessions. Fresh recipient-side readability remains necessary before declaring the delivery issue resolved.

@@ -1,15 +1,15 @@
-const pino = require('pino');
 const NodeCache = require('node-cache');
 const { makeCacheableSignalKeyStore } = require('gifted-baileys');
 const { cachedGroupMetadata } = require('./groupCache');
 const { prepareSelfChatRecipients } = require('./selfChatTransport');
+const { createTransportLogger } = require('./transportLogger');
 
 const _userDevicesCache = new NodeCache({ stdTTL: 1800, useClones: false });
 
 const createSocketConfig = (version, state, logger) => {
     return {
         version,
-        logger: pino({ level: 'silent' }),
+        logger: createTransportLogger(),
         browser: ['Ubuntu', 'Chrome', '22.04.4'],
         auth: {
             creds: state.creds,

@@ -77,6 +77,7 @@ test("self-chat refreshes device discovery, preserves options and stores the rou
     await socket.sendMessage("456@s.whatsapp.net", { text: "other" });
     assert.equal(calls[1].length, 2);
     assert.equal(calls[1][0], "456@s.whatsapp.net");
-    assert.equal(saved.length, 1);
+    assert.equal(saved.length, 2, "direct messages are saved immediately for retry recovery");
+    assert.equal(saved[1][0], "456@s.whatsapp.net");
     assert.equal(cleared.length, 1, "other chats do not invalidate device discovery");
 });

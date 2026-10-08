@@ -248,6 +248,13 @@ async function startGifted() {
                 console.info(
                     `[WhatsApp] Self-chat resend lookup: ${result.source}; chat=${domain(chat)}; requester=${domain(requester)}/${requester?.device ? "companion" : "primary"}.`,
                 );
+            } else if (key.fromMe) {
+                const chat = jidDecode(key.remoteJid);
+                if (chat?.server === "lid" || chat?.server === "s.whatsapp.net") {
+                    console.info(
+                        `[WhatsApp] DM resend lookup: ${result.source}; chat=${chat.server === "lid" ? "lid" : "phone"}.`,
+                    );
+                }
             }
             return result.message;
         };

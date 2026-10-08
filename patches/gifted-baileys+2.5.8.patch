@@ -23,7 +23,18 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/messages-recv.js b/node_modu
 +    const sendMessagesAgain = async (key, ids, retryNode, receiptNode) => {
          var _a;
          // todo: implement a cache to store the last 256 sent messages (copy whatsmeow)
-@@ -481,5 +484,18 @@
+@@ -477,9 +480,29 @@
+         const remoteJid = key.remoteJid;
+         const participant = key.participant || remoteJid;
++        // Missing plaintext cannot be resent. Do not replace valid sessions
++        // just because an old receipt requests a message no longer retained.
++        if (!msgs.some(Boolean)) {
++            for (const id of ids) updateSendMessageAgainCount(id, participant);
++            logger.debug({ participant }, 'retry message unavailable; preserving sessions');
++            return;
++        }
+         // if it's the primary jid sending the request
+         // just re-send the message to everyone
          // prevents the first message decryption failure
          const sendToAll = !((_a = (0, WABinary_1.jidDecode)(participant)) === null || _a === void 0 ? void 0 : _a.device);
 -        await assertSessions([participant], true);
@@ -117,10 +128,97 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/messages-recv.js b/node_modu
              offlineNodeProcessor.enqueue(type, node);
          }
          else {
+diff --git a/node_modules/gifted-baileys/lib/Socket/messages-send.js b/node_modules/gifted-baileys/lib/Socket/messages-send.js
+--- a/node_modules/gifted-baileys/lib/Socket/messages-send.js
++++ b/node_modules/gifted-baileys/lib/Socket/messages-send.js
+@@ -170,7 +170,7 @@
+             if (useCache) {
+                 const devices = userDevicesCache.get(user);
+                 if (devices) {
+-                    deviceResults.push(...devices);
++                    deviceResults.push(...devices.filter(item => !ignoreZeroDevices || (item.device || 0) !== 0));
+                     logger.trace({ user }, "using cache for devices");
+                 } else {
+                     toFetch.push(jid);
+@@ -194,6 +194,7 @@
+                 result === null || result === void 0 ? void 0 : result.list,
+                 authState.creds.me.id,
+                 ignoreZeroDevices,
++                authState.creds.me.lid,
+             );
+             const deviceMap = {};
+             for (const item of extracted) {
+@@ -359,7 +360,7 @@
+     ) => {
+         var _a;
+         const meId = authState.creds.me.id;
+-        let shouldIncludeDeviceIdentity = false;
++        let shouldIncludeDeviceIdentity = !!participant;
+         const { user, server } = (0, WABinary_1.jidDecode)(jid);
+         const statusJid = "status@broadcast";
+         const isGroup = server === "g.us";
+@@ -400,8 +401,8 @@
+                     device_fanout: "false",
+                 };
+             }
+-            const { user, device } = (0, WABinary_1.jidDecode)(participant.jid);
+-            devices.push({ user, device });
++            const { user, device, server } = (0, WABinary_1.jidDecode)(participant.jid);
++            devices.push({ user, device, server });
+         }
+         await authState.keys.transaction(async () => {
+             var _a, _b, _c, _d, _e;
+@@ -616,7 +617,7 @@
+                 const meLidUser =
+                     meLid === null || meLid === void 0
+                         ? void 0
+-                        : meLid.split(":")[0];
++                        : (0, WABinary_1.jidDecode)(meLid).user;
+                 const mePhone =
+                     meUser === null || meUser === void 0
+                         ? void 0
+@@ -651,27 +652,33 @@
+                 const allJids = [];
+                 const meJids = [];
+                 const otherJids = [];
+-                for (const { user: deviceUser, device } of devices) {
++                for (const { user: deviceUser, device, server: deviceServer } of devices) {
+                     const isMe =
+                         deviceUser === meUser ||
+                         deviceUser === mePhone ||
+                         deviceUser === meLidUser;
+                     let encodedJid;
++                    const recipientServer = deviceServer || (isLid ? "lid" : "s.whatsapp.net");
++                    if (isMe && device && [meId, meLid].filter(Boolean).some(ownJid => {
++                        const ownDevice = (0, WABinary_1.jidDecode)(ownJid);
++                        return device === ownDevice.device;
++                    })) continue;
+
+                     if (isMe) {
+                         encodedJid = (0, WABinary_1.jidEncode)(
+-                            isLid ? meLidUser || mePhone : mePhone,
+-                            isLid ? "lid" : "s.whatsapp.net",
++                            recipientServer === "lid" ? meLidUser || mePhone : mePhone,
++                            recipientServer,
+                             device,
+                         );
+                     } else {
+                         encodedJid = (0, WABinary_1.jidEncode)(
+                             deviceUser,
+-                            isLid ? "lid" : "s.whatsapp.net",
++                            recipientServer,
+                             device,
+                         );
+                     }
+
++                    if (allJids.includes(encodedJid)) continue;
+                     if (isMe) {
+                         meJids.push(encodedJid);
+                     } else {
 diff --git a/node_modules/gifted-baileys/lib/Utils/signal.js b/node_modules/gifted-baileys/lib/Utils/signal.js
 --- a/node_modules/gifted-baileys/lib/Utils/signal.js
 +++ b/node_modules/gifted-baileys/lib/Utils/signal.js
-@@ -96,5 +96,39 @@
+@@ -96,20 +96,56 @@
      }
  };
 -exports.parseAndInjectE2ESessions = parseAndInjectE2ESessions;
@@ -159,8 +257,29 @@ diff --git a/node_modules/gifted-baileys/lib/Utils/signal.js b/node_modules/gift
 +    };
 +};
 +exports.extractE2ESessionFromRetryReceipt = extractE2ESessionFromRetryReceipt;
- const extractDeviceJids = (result, myJid, excludeZeroDevices) => {
+-const extractDeviceJids = (result, myJid, excludeZeroDevices) => {
++const extractDeviceJids = (result, myJid, excludeZeroDevices, myLid) => {
      const { user: myUser, device: myDevice } = (0, WABinary_1.jidDecode)(myJid);
++    const ownLid = myLid && (0, WABinary_1.jidDecode)(myLid);
+     const extracted = [];
+     for (const userResult of result) {
+         const { devices, id } = userResult;
+-        const { user } = (0, WABinary_1.jidDecode)(id);
++        const { user, server } = (0, WABinary_1.jidDecode)(id);
+         const deviceList = devices === null || devices === void 0 ? void 0 : devices.deviceList;
+         if (Array.isArray(deviceList)) {
+             for (const { id: device, keyIndex } of deviceList) {
+                 if ((!excludeZeroDevices || device !== 0) && // if zero devices are not-excluded, or device is non zero
+-                    (myUser !== user || myDevice !== device) && // either different user or if me user, not this device
++                    (myUser !== user || myDevice !== device) &&
++                    (!ownLid || ownLid.user !== user || (ownLid.device || myDevice) !== device) &&
+                     (device === 0 || !!keyIndex) // ensure that "key-index" is specified for "non-zero" devices, produces a bad req otherwise
+                 ) {
+-                    extracted.push({ user, device });
++                    extracted.push({ user, device, server });
+                 }
+             }
+         }
 diff --git a/node_modules/gifted-baileys/lib/Socket/socket.js b/node_modules/gifted-baileys/lib/Socket/socket.js
 --- a/node_modules/gifted-baileys/lib/Socket/socket.js
 +++ b/node_modules/gifted-baileys/lib/Socket/socket.js

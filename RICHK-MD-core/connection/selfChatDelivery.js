@@ -12,8 +12,11 @@ function trackSelfChatDelivery(socket, log = console.info) {
         const attrs = node?.attrs || {};
         const me = socket.authState?.creds?.me || socket.user || {};
         const ownJids = [me.id, me.lid].map(standardizeJid).filter(Boolean);
-        if (!ownJids.includes(standardizeJid(attrs.from))) return;
-        if (attrs.recipient && !ownJids.includes(standardizeJid(attrs.recipient))) return;
+        const sender = standardizeJid(attrs.from);
+        const isOwn = ownJids.includes(sender);
+        if (!isOwn && !/@(lid|s\.whatsapp\.net)$/.test(sender)) return;
+        if (isOwn && attrs.recipient && !ownJids.includes(standardizeJid(attrs.recipient))) return;
+        const label = isOwn ? "Self-chat" : "DM";
 
         if (attrs.type === "retry") {
             const retry = getBinaryNodeChild(node, "retry");
@@ -28,10 +31,10 @@ function trackSelfChatDelivery(socket, log = console.info) {
                 }
             }
             // Never log receipt bodies, keys, message IDs or personal JIDs.
-            log(`[WhatsApp] Self-chat retry: attempt=${attempt}; keyBundle=${bundle}.`);
+            log(`[WhatsApp] ${label} retry: attempt=${attempt}; keyBundle=${bundle}.`);
         } else if (!attrs.type || attrs.type === "read") {
             const status = attrs.type === "read" ? "read" : "delivered";
-            log(`[WhatsApp] Self-chat device receipt: ${status}.`);
+            log(`[WhatsApp] ${label} device receipt: ${status}.`);
         }
     };
     const onConnection = (update) => {
