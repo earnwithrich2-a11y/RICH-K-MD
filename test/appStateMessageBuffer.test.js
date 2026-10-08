@@ -5,7 +5,7 @@ const vm = require("node:vm");
 const { EventEmitter } = require("node:events");
 const { makeEventBuffer } = require("gifted-baileys/lib/Utils/event-buffer");
 
-function harness(creds = {}) {
+function harness(creds = {}, config = {}) {
     const source = fs.readFileSync(require.resolve("gifted-baileys/lib/Socket/chats"), "utf8");
     const declarations = source.slice(source.indexOf("let needToFlushWithAppStateSync"),
         source.indexOf("/** this mutex"));
@@ -14,7 +14,7 @@ function harness(creds = {}) {
     const syncStart = source.indexOf("async function doAppStateSync()");
     const syncEnd = source.indexOf("\n    });", syncStart);
     const sync = source.slice(syncStart, syncEnd).replace(/\n    }\s*$/, "");
-    const keyStart = source.indexOf("if (((_c = (_b = msg.message)");
+    const keyStart = source.indexOf("if (config.syncAppState !== false && ((_c = (_b = msg.message)");
     const keyEnd = source.indexOf("\n        async function doAppStateSync()", keyStart);
     const keyShare = source.slice(keyStart, keyEnd);
     assert.ok(declarations.includes("finishAppStateBuffer"));
@@ -26,7 +26,7 @@ function harness(creds = {}) {
     ev.on("messages.upsert", value => delivered.push(...value.messages));
     let syncs = 0;
     const context = {
-        ev, authState: { creds }, logger, fireInitQueries: false, markOnlineOnConnect: false,
+        ev, config, authState: { creds }, logger, fireInitQueries: false, markOnlineOnConnect: false,
         sendPresenceUpdate: async () => {}, onUnexpectedError() {},
         Types_1: { ALL_WA_PATCH_NAMES: [] },
         resyncAppState: async () => { syncs += 1; },
@@ -120,5 +120,16 @@ test("an available app-sync key does not create an unnecessary buffer", () => {
     h.queue();
     assert.equal(h.ev.isBuffering(), false);
     assert.equal(h.delivered.length, 1);
+    assert.equal(h.timers.length, 0);
+});
+
+test("the bot's disabled passive sync never starts an app-key wait or initial resync", async () => {
+    const h = harness({}, { syncAppState: false });
+    h.pending();
+    h.queue();
+    await h.context.keyShare({ message: { protocolMessage: { appStateSyncKeyShare: {} } } });
+    assert.equal(h.ev.isBuffering(), false);
+    assert.equal(h.delivered.length, 1);
+    assert.equal(h.syncs, 0);
     assert.equal(h.timers.length, 0);
 });

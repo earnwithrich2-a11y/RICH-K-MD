@@ -1,6 +1,11 @@
 diff --git a/node_modules/gifted-baileys/lib/Socket/messages-recv.js b/node_modules/gifted-baileys/lib/Socket/messages-recv.js
 --- a/node_modules/gifted-baileys/lib/Socket/messages-recv.js
 +++ b/node_modules/gifted-baileys/lib/Socket/messages-recv.js
+@@ -318,3 +318,3 @@
+                 const update = (0, WABinary_1.getBinaryNodeChild)(node, 'collection');
+-                if (update) {
++                if (update && config.syncAppState !== false) {
+                     const name = update.attrs.name;
 @@ -471,5 +471,5 @@
          msgRetryCache.set(key, newValue);
      };
@@ -82,6 +87,9 @@ diff --git a/node_modules/gifted-baileys/lib/Utils/signal.js b/node_modules/gift
 diff --git a/node_modules/gifted-baileys/lib/Socket/socket.js b/node_modules/gifted-baileys/lib/Socket/socket.js
 --- a/node_modules/gifted-baileys/lib/Socket/socket.js
 +++ b/node_modules/gifted-baileys/lib/Socket/socket.js
+@@ -35,1 +35,1 @@
+-    const ev = (0, Utils_1.makeEventBuffer)(logger);
++    const ev = (0, Utils_1.makeEventBuffer)(logger, config.bufferLiveMessages !== false);
 @@ -542,5 +542,29 @@
          }
      });
@@ -135,9 +143,15 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/chats.js b/node_modules/gift
 +        ev.flush();
 +    };
      let pendingAppStateSync = false;
+@@ -757,1 +766,1 @@
+-        if (historyMsg && !authState.creds.myAppStateKeyId) {
++        if (config.syncAppState !== false && historyMsg && !authState.creds.myAppStateKeyId) {
+@@ -763,1 +772,1 @@
+-                if (historyMsg && authState.creds.myAppStateKeyId) {
++                if (config.syncAppState !== false && historyMsg && authState.creds.myAppStateKeyId) {
 @@ -782,1 +791,1 @@
 -        if (((_c = (_b = msg.message) === null || _b === void 0 ? void 0 : _b.protocolMessage) === null || _c === void 0 ? void 0 : _c.appStateSyncKeyShare) && pendingAppStateSync) {
-+        if (((_c = (_b = msg.message) === null || _b === void 0 ? void 0 : _b.protocolMessage) === null || _c === void 0 ? void 0 : _c.appStateSyncKeyShare) && (pendingAppStateSync || needToFlushWithAppStateSync)) {
++        if (config.syncAppState !== false && ((_c = (_b = msg.message) === null || _b === void 0 ? void 0 : _b.protocolMessage) === null || _c === void 0 ? void 0 : _c.appStateSyncKeyShare) && (pendingAppStateSync || needToFlushWithAppStateSync)) {
 @@ -792,6 +801,3 @@
 -                if (needToFlushWithAppStateSync) {
 -                    logger.debug('flushing with app state sync');
@@ -160,7 +174,7 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/chats.js b/node_modules/gift
 -            // we keep buffering events until we finally have
 -            // the key and can sync the messages
 -            // todo scrutinize
-+        if (receivedPendingNotifications && !didStartAppStateBuffer &&
++        if (config.syncAppState !== false && receivedPendingNotifications && !didStartAppStateBuffer &&
              !((_a = authState.creds) === null || _a === void 0 ? void 0 : _a.myAppStateKeyId)) {
              ev.buffer();
              needToFlushWithAppStateSync = true;
@@ -174,3 +188,30 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/chats.js b/node_modules/gift
 +            appStateBufferTimeout.unref?.();
          }
      });
+diff --git a/node_modules/gifted-baileys/lib/Utils/event-buffer.js b/node_modules/gifted-baileys/lib/Utils/event-buffer.js
+--- a/node_modules/gifted-baileys/lib/Utils/event-buffer.js
++++ b/node_modules/gifted-baileys/lib/Utils/event-buffer.js
+@@ -32,1 +32,1 @@
+-const makeEventBuffer = (logger) => {
++const makeEventBuffer = (logger, bufferLiveMessages = true) => {
+@@ -81,2 +81,12 @@
+         emit(event, evData) {
++            if (!bufferLiveMessages && (
++                (event === 'messages.upsert' && evData?.type === 'notify') ||
++                ['messages.update', 'messages.delete', 'messages.reaction', 'message-receipt.update'].includes(event))) {
++                if (event === 'messages.upsert') {
++                    for (const message of evData.messages || []) {
++                        delete data.messageUpserts[stringifyMessageKey(message.key)];
++                    }
++                }
++                return ev.emit('event', { [event]: evData });
++            }
+             if (buffersInProgress && BUFFERABLE_EVENT_SET.has(event)) {
+@@ -97,4 +107,7 @@
+         isBuffering() {
+             return buffersInProgress > 0;
+         },
++        isBufferingLiveMessages() {
++            return bufferLiveMessages && buffersInProgress > 0;
++        },
+         buffer,

@@ -4,12 +4,14 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { EventEmitter } = require("node:events");
+const { makeEventBuffer } = require("gifted-baileys/lib/Utils/event-buffer");
 
-function dispatcherHarness(failFirstSettingsRead = false) {
+function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter()) {
     const source = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
     const start = source.indexOf("function setupCommandHandler(");
     const end = source.indexOf("function setupGiftedHelpers(", start);
     const calls = [];
+    const replies = [];
     let reads = 0;
     const settings = { PREFIX: ".", MODE: "public", BOT_PAUSED: "false" };
     const setup = vm.runInNewContext(
@@ -39,7 +41,10 @@ function dispatcherHarness(failFirstSettingsRead = false) {
             },
             findCommand: (pattern) => ({
                 pattern,
-                async function(_from, _socket, context) { calls.push(context.fixtureId); },
+                async function(from, socket, context) {
+                    calls.push(context.fixtureId);
+                    await socket.sendMessage(from, { text: `reply:${context.fixtureId}` });
+                },
             }),
             getGroupInfo: async () => ({ sender: "synthetic-sender" }),
             buildSuperUsers: async () => [],
@@ -51,11 +56,16 @@ function dispatcherHarness(failFirstSettingsRead = false) {
             buildContext: (ms) => ({ fixtureId: ms.key.id }),
         },
     );
-    const socket = { user: { id: "synthetic-bot" }, ev: new EventEmitter() };
+    const socket = {
+        user: { id: "synthetic-bot" }, ev,
+        sendMessage: async (from, payload) => { replies.push({ from, payload }); },
+    };
     setup(socket);
     return {
         calls,
-        receive: socket.ev.listeners("messages.upsert")[0],
+        replies,
+        receive: ev instanceof EventEmitter ? socket.ev.listeners("messages.upsert")[0] : undefined,
+        socket,
     };
 }
 
@@ -98,4 +108,53 @@ test("one failed message cannot abort the rest of its batch", async () => {
         messages: [message("failed"), message("next")],
     });
     assert.deepEqual(harness.calls, ["next"]);
+});
+
+const logger = { trace() {}, debug() {}, warn() {}, error() {} };
+const drainHandlers = () => new Promise(resolve => setImmediate(resolve));
+
+test("fresh commands run while background events remain buffered indefinitely", async () => {
+    const ev = makeEventBuffer(logger, false);
+    const harness = dispatcherHarness(false, ev);
+    ev.buffer();
+    ev.buffer();
+    assert.equal(ev.isBuffering(), true);
+    assert.equal(ev.isBufferingLiveMessages(), false);
+    ev.emit("messages.upsert", {
+        type: "notify", messages: [message("live-ping"), message("live-love", ".love")],
+    });
+    await drainHandlers();
+    assert.deepEqual(harness.calls, ["live-ping", "live-love"]);
+    assert.deepEqual(harness.replies.map(reply => reply.payload.text), ["reply:live-ping", "reply:live-love"]);
+    ev.flush();
+    ev.flush();
+    await drainHandlers();
+    assert.deepEqual(harness.calls, ["live-ping", "live-love"], "buffer completion must not replay commands");
+    assert.equal(harness.replies.length, 2);
+});
+
+test("a live notification replaces its older queued copy without duplicate execution", async () => {
+    const ev = makeEventBuffer(logger, false);
+    const harness = dispatcherHarness(false, ev);
+    const msg = message("same-command");
+    ev.buffer();
+    ev.emit("messages.upsert", { type: "append", messages: [msg] });
+    ev.emit("messages.upsert", { type: "notify", messages: [msg] });
+    await drainHandlers();
+    assert.deepEqual(harness.calls, ["same-command"]);
+    ev.flush();
+    await drainHandlers();
+    assert.deepEqual(harness.calls, ["same-command"]);
+});
+
+test("default SDK buffering and background event consolidation are preserved", () => {
+    const ev = makeEventBuffer(logger);
+    const delivered = [];
+    ev.on("messages.upsert", value => delivered.push(value));
+    ev.buffer();
+    ev.emit("messages.upsert", { type: "notify", messages: [message("default-sdk")] });
+    assert.equal(ev.isBufferingLiveMessages(), true);
+    assert.equal(delivered.length, 0);
+    ev.flush();
+    assert.equal(delivered.length, 1);
 });
