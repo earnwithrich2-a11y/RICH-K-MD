@@ -1,19 +1,29 @@
 diff --git a/node_modules/gifted-baileys/lib/Socket/messages-recv.js b/node_modules/gifted-baileys/lib/Socket/messages-recv.js
 --- a/node_modules/gifted-baileys/lib/Socket/messages-recv.js
 +++ b/node_modules/gifted-baileys/lib/Socket/messages-recv.js
-@@ -318,3 +318,3 @@
+@@ -37,6 +37,9 @@
+             useClones: false
+         });
+     let sendActiveReceipts = false;
++    // Retry network work must not occupy the incoming-message mutex.
++    const receiptProcessingMutex = config.prioritizeLiveMessages
++        ? (0, require('../Utils/make-mutex').makeKeyedMutex)() : undefined;
+     const sendMessageAck = async ({ tag, attrs, content }, errorCode) => {
+         const stanza = {
+             tag: 'ack',
+@@ -331,3 +334,3 @@
                  const update = (0, WABinary_1.getBinaryNodeChild)(node, 'collection');
 -                if (update) {
 +                if (update && config.syncAppState !== false) {
                      const name = update.attrs.name;
-@@ -471,5 +471,5 @@
+@@ -471,5 +474,5 @@
          msgRetryCache.set(key, newValue);
      };
 -    const sendMessagesAgain = async (key, ids, retryNode) => {
 +    const sendMessagesAgain = async (key, ids, retryNode, receiptNode) => {
          var _a;
          // todo: implement a cache to store the last 256 sent messages (copy whatsmeow)
-@@ -481,5 +481,18 @@
+@@ -481,5 +484,18 @@
          // prevents the first message decryption failure
          const sendToAll = !((_a = (0, WABinary_1.jidDecode)(participant)) === null || _a === void 0 ? void 0 : _a.device);
 -        await assertSessions([participant], true);
@@ -33,13 +43,80 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/messages-recv.js b/node_modu
 +        }
          if ((0, WABinary_1.isJidGroup)(remoteJid)) {
              await authState.keys.set({ 'sender-key-memory': { [remoteJid]: null } });
-@@ -564,5 +577,5 @@
+@@ -528,9 +544,15 @@
+             const items = (0, WABinary_1.getBinaryNodeChildren)(content[0], 'item');
+             ids.push(...items.map(i => i.attrs.id));
+         }
++        const runReceiptWork = work => receiptProcessingMutex
++            ? receiptProcessingMutex.mutex(attrs.participant || attrs.from, work)
++            : processingMutex.mutex(work);
++        // Acknowledge reception before a potentially slow resend, not afterwards.
++        const ackEarly = !!receiptProcessingMutex;
++        if (ackEarly) await sendMessageAck(node);
+         try {
+             await Promise.all([
+-                processingMutex.mutex(async () => {
++                runReceiptWork(async () => {
+                     const status = (0, Utils_1.getStatusFromReceiptType)(attrs.type);
+                     if (typeof status !== 'undefined' &&
+                         // basically, we only want to know when a message from us has been delivered to/read by the other person
+@@ -564,5 +586,5 @@
                                  try {
                                      logger.debug({ attrs, key }, 'recv retry request');
 -                                    await sendMessagesAgain(key, ids, retryNode);
 +                                    await sendMessagesAgain(key, ids, retryNode, node);
                                  }
                                  catch (error) {
+@@ -581,7 +603,7 @@
+             ]);
+         }
+         finally {
+-            await sendMessageAck(node);
++            if (!ackEarly) await sendMessageAck(node);
+         }
+     };
+     const handleNotification = async (node) => {
+@@ -858,16 +880,23 @@
+             }
+             isProcessing = true;
+             const promise = async () => {
+-                while (nodes.length && ws.isOpen) {
+-                    const { type, node } = nodes.shift();
+-                    const nodeProcessor = nodeProcessorMap.get(type);
+-                    if (!nodeProcessor) {
+-                        onUnexpectedError(new Error(`unknown offline node type: ${type}`), 'processing offline node');
+-                        continue;
++                try {
++                    while (nodes.length && ws.isOpen) {
++                        const { type, node } = nodes.shift();
++                        const nodeProcessor = nodeProcessorMap.get(type);
++                        if (!nodeProcessor) {
++                            onUnexpectedError(new Error(`unknown offline node type: ${type}`), 'processing offline node');
++                            continue;
++                        }
++                        try {
++                            await nodeProcessor(node);
++                        } catch (error) {
++                            onUnexpectedError(error, 'processing offline node');
++                        }
+                     }
+-                    await nodeProcessor(node);
++                } finally {
++                    isProcessing = false;
+                 }
+-                isProcessing = false;
+             };
+             promise().catch(error => onUnexpectedError(error, 'processing offline nodes'));
+         };
+@@ -876,7 +905,7 @@
+     const offlineNodeProcessor = makeOfflineNodeProcessor();
+     const processNode = (type, node, identifier, exec) => {
+         const isOffline = !!node.attrs.offline;
+-        if (isOffline) {
++        if (isOffline && !(config.prioritizeLiveMessages && type === 'receipt')) {
+             offlineNodeProcessor.enqueue(type, node);
+         }
+         else {
 diff --git a/node_modules/gifted-baileys/lib/Utils/signal.js b/node_modules/gifted-baileys/lib/Utils/signal.js
 --- a/node_modules/gifted-baileys/lib/Utils/signal.js
 +++ b/node_modules/gifted-baileys/lib/Utils/signal.js
@@ -194,8 +271,31 @@ diff --git a/node_modules/gifted-baileys/lib/Utils/event-buffer.js b/node_module
 @@ -32,1 +32,1 @@
 -const makeEventBuffer = (logger) => {
 +const makeEventBuffer = (logger, bufferLiveMessages = true) => {
-@@ -81,2 +81,12 @@
+@@ -33,1 +33,2 @@
+     const ev = new events_1.default();
++    const liveStartTime = Date.now() - 5000;
+@@ -89,2 +90,32 @@
          emit(event, evData) {
++            if (!bufferLiveMessages && event === 'messages.upsert' && evData?.type === 'append') {
++                const live = [], historical = [];
++                const now = Date.now();
++                for (const message of evData.messages || []) {
++                    const raw = message.messageTimestamp;
++                    const timestamp = Number(raw) || (raw && typeof raw === 'object'
++                        ? (Number(raw.high) || 0) * 4294967296 + (raw.low >>> 0) : 0);
++                    const recent = Number.isFinite(timestamp) && timestamp * 1000 >= liveStartTime
++                        && timestamp * 1000 <= now + 30000;
++                    (recent ? live : historical).push(message);
++                }
++                if (live.length) {
++                    for (const message of live) {
++                        delete data.messageUpserts[stringifyMessageKey(message.key)];
++                    }
++                    ev.emit('event', { [event]: { ...evData, type: 'notify', messages: live } });
++                }
++                if (!historical.length) return true;
++                evData = { ...evData, messages: historical };
++            }
 +            if (!bufferLiveMessages && (
 +                (event === 'messages.upsert' && evData?.type === 'notify') ||
 +                ['messages.update', 'messages.delete', 'messages.reaction', 'message-receipt.update'].includes(event))) {
@@ -207,7 +307,7 @@ diff --git a/node_modules/gifted-baileys/lib/Utils/event-buffer.js b/node_module
 +                return ev.emit('event', { [event]: evData });
 +            }
              if (buffersInProgress && BUFFERABLE_EVENT_SET.has(event)) {
-@@ -97,4 +107,7 @@
+@@ -97,4 +128,7 @@
          isBuffering() {
              return buffersInProgress > 0;
          },

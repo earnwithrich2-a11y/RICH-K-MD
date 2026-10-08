@@ -123,3 +123,42 @@ test("edits, deletions and delivery receipts stay live while account events rema
     assert.equal(immediate.length, 4);
     assert.equal(chatEvents.length, 1);
 });
+
+test("fresh reconnect messages become live while old and undated history stays append", () => {
+    const ev = makeEventBuffer(logger, false);
+    const events = [];
+    ev.on("messages.upsert", value => events.push(value));
+    ev.buffer();
+    const message = (id, timestamp) => ({
+        key: { id, remoteJid: "10001@s.whatsapp.net", fromMe: false },
+        message: { conversation: ".ping" }, messageTimestamp: timestamp,
+    });
+    const now = Math.floor(Date.now() / 1000);
+    ev.emit("messages.upsert", { type: "append", messages: [
+        message("historical", now - 86400),
+        message("fresh", { low: now, high: 0 }),
+        message("unknown", undefined),
+        message("invalid-future", now + 86400),
+    ] });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].type, "notify");
+    assert.deepEqual(events[0].messages.map(m => m.key.id), ["fresh"]);
+    ev.flush();
+    assert.equal(events.length, 2);
+    assert.equal(events[1].type, "append");
+    assert.deepEqual(events[1].messages.map(m => m.key.id), ["historical", "unknown", "invalid-future"]);
+});
+
+test("SDK default does not promote append messages to live notifications", () => {
+    const ev = makeEventBuffer(logger);
+    const events = [];
+    ev.on("messages.upsert", value => events.push(value));
+    ev.buffer();
+    ev.emit("messages.upsert", { type: "append", messages: [{
+        key: { id: "default-append", remoteJid: "10001@s.whatsapp.net", fromMe: true },
+        message: { conversation: ".ping" }, messageTimestamp: Math.floor(Date.now() / 1000),
+    }] });
+    assert.equal(events.length, 0);
+    ev.flush();
+    assert.equal(events[0].type, "append");
+});
