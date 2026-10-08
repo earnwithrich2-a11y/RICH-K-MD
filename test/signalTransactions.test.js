@@ -177,3 +177,80 @@ test("SQLite key batches roll back if one key cannot be written", async () => {
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test("slow relay discovery does not block fresh crypto while writes stay atomic", async () => {
+    const fs = require("node:fs"), vm = require("node:vm");
+    const source = fs.readFileSync(require.resolve("gifted-baileys/lib/Socket/messages-send"), "utf8");
+    const begin = source.indexOf("const runRelayWork = config.atomicSignalOperations");
+    const end = source.indexOf("await runRelayWork", begin);
+    assert.ok(begin >= 0 && end > begin, "SDK relay must use the bounded crypto boundary");
+    const sender = auth(), receiver = auth();
+    const sending = makeAtomicSignalRepository(sender), receiving = makeAtomicSignalRepository(receiver);
+    await sending.injectE2ESession({ jid: "15550000002@s.whatsapp.net", session: bundle(receiver) });
+    const runRelay = vm.runInNewContext(`${source.slice(begin, end)}; runRelayWork`, {
+        config: { atomicSignalOperations: true }, authState: sender,
+    });
+    const entered = latch(), discovery = latch();
+    const historicalRetry = runRelay(async () => {
+        entered.resolve();
+        await discovery.promise; // Represents a slow USync/key-server/metadata query.
+        return sending.encryptMessage({ jid: "15550000002@s.whatsapp.net", data: Buffer.from("Old resend") });
+    });
+    await entered.promise;
+    try {
+        const fresh = await Promise.race([
+            runRelay(() => sending.encryptMessage({ jid: "15550000002@s.whatsapp.net", data: Buffer.from("Fresh Pong") })),
+            new Promise((_, reject) => {
+                const timer = setTimeout(() => reject(new Error("fresh reply blocked by discovery")), 500);
+                timer.unref();
+            }),
+        ]);
+        const plain = await receiving.decryptMessage({ jid: "15550000001:4@s.whatsapp.net", ...fresh });
+        assert.equal(Buffer.from(plain).toString(), "Fresh Pong");
+    } finally {
+        discovery.resolve();
+        const historical = await historicalRetry;
+        const plain = await receiving.decryptMessage({ jid: "15550000001:4@s.whatsapp.net", ...historical });
+        assert.equal(Buffer.from(plain).toString(), "Old resend");
+    }
+});
+
+test("pre-key uploads persist private keys before a slow server query and leave crypto available", async () => {
+    const fs = require("node:fs"), vm = require("node:vm");
+    const source = fs.readFileSync(require.resolve("gifted-baileys/lib/Socket/socket"), "utf8");
+    const begin = source.indexOf("const uploadPreKeys = async");
+    const end = source.indexOf("const uploadPreKeysToServerIfRequired", begin);
+    const sender = auth(), receiver = auth(), sending = makeAtomicSignalRepository(sender);
+    const receiving = makeAtomicSignalRepository(receiver), entered = latch(), response = latch();
+    await sending.injectE2ESession({ jid: "15550000002@s.whatsapp.net", session: bundle(receiver) });
+    const upload = vm.runInNewContext(`${source.slice(begin, end)}; uploadPreKeys`, {
+        Defaults_1: { INITIAL_PREKEY_COUNT: 1 },
+        Utils_1: require("gifted-baileys/lib/Utils"),
+        creds: sender.creds,
+        keys: sender.keys,
+        logger: { info() {} },
+        ev: { emit(_, update) { Object.assign(sender.creds, update); } },
+        async query() {
+            assert.ok(Object.keys(sender.state.data["pre-key"] || {}).length > 0, "private keys must already be durable");
+            entered.resolve();
+            await response.promise;
+        },
+    });
+    const pendingUpload = upload(1);
+    await entered.promise;
+    try {
+        const sent = await Promise.race([
+            sending.encryptMessage({ jid: "15550000002@s.whatsapp.net", data: Buffer.from("Pong during upload") }),
+            new Promise((_, reject) => {
+                const timer = setTimeout(() => reject(new Error("key-server query blocked fresh crypto")), 500);
+                timer.unref();
+            }),
+        ]);
+        assert.equal(Buffer.from(await receiving.decryptMessage({
+            jid: "15550000001:4@s.whatsapp.net", ...sent,
+        })).toString(), "Pong during upload");
+    } finally {
+        response.resolve();
+        await pendingUpload;
+    }
+});

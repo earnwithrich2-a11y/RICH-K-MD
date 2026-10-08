@@ -1,3 +1,26 @@
+diff --git a/node_modules/gifted-baileys/lib/Socket/socket.js b/node_modules/gifted-baileys/lib/Socket/socket.js
+--- a/node_modules/gifted-baileys/lib/Socket/socket.js
++++ b/node_modules/gifted-baileys/lib/Socket/socket.js
+@@ -192,13 +192,17 @@
+     };
+     /** generates and uploads a set of pre-keys to the server */
+     const uploadPreKeys = async (count = Defaults_1.INITIAL_PREKEY_COUNT) => {
++        let uploadNode;
+         await keys.transaction(async () => {
+             logger.info({ count }, 'uploading pre-keys');
+             const { update, node } = await (0, Utils_1.getNextPreKeysNode)({ creds, keys }, count);
+-            await query(node);
++            uploadNode = node;
+             ev.emit('creds.update', update);
+-            logger.info({ count }, 'uploaded pre-keys');
+         });
++        // Commit private pre-keys before advertising their public counterparts.
++        // Waiting for the key server must not block unrelated crypto operations.
++        await query(uploadNode);
++        logger.info({ count }, 'uploaded pre-keys');
+     };
+     const uploadPreKeysToServerIfRequired = async () => {
+         const preKeyCount = await getAvailablePreKeysOnServer();
 diff --git a/node_modules/gifted-baileys/lib/Utils/auth-utils.js b/node_modules/gifted-baileys/lib/Utils/auth-utils.js
 --- a/node_modules/gifted-baileys/lib/Utils/auth-utils.js
 +++ b/node_modules/gifted-baileys/lib/Utils/auth-utils.js
@@ -365,7 +388,7 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/messages-send.js b/node_modu
          const { user, server } = (0, WABinary_1.jidDecode)(jid);
          const statusJid = "status@broadcast";
          const isGroup = server === "g.us";
-@@ -400,8 +401,8 @@
+@@ -400,8 +401,13 @@
                      device_fanout: "false",
                  };
              }
@@ -374,7 +397,13 @@ diff --git a/node_modules/gifted-baileys/lib/Socket/messages-send.js b/node_modu
 +            const { user, device, server } = (0, WABinary_1.jidDecode)(participant.jid);
 +            devices.push({ user, device, server });
          }
-         await authState.keys.transaction(async () => {
+-        await authState.keys.transaction(async () => {
++        // With an atomic repository, lock only crypto operations rather than
++        // device discovery, group metadata queries or network writes.
++        const runRelayWork = config.atomicSignalOperations
++            ? work => work()
++            : work => authState.keys.transaction(work);
++        await runRelayWork(async () => {
              var _a, _b, _c, _d, _e;
 @@ -616,7 +617,7 @@
                  const meLidUser =
