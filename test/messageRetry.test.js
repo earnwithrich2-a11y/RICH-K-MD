@@ -66,11 +66,16 @@ test("does not use another chat's message for a self-chat retry", async () => {
     assert.equal(result.source, "missing");
 });
 
-test("does not use alternate lookup for another chat or inbound message", async () => {
+test("does not return an unrelated alternate or look up inbound aliases", async () => {
+    let alternateReads = 0;
     const store = {
         loadMessage: async () => null,
         loadMessageById: async () => {
-            throw new Error("alternate lookup should not run");
+            alternateReads++;
+            return {
+                key: { remoteJid: "unrelated@s.whatsapp.net", fromMe: true },
+                message: { conversation: "Other chat" },
+            };
         },
     };
     for (const key of [
@@ -81,6 +86,7 @@ test("does not use alternate lookup for another chat or inbound message", async 
         assert.equal(result.message, undefined);
         assert.equal(result.isSelfChat, false);
     }
+    assert.equal(alternateReads, 1, "inbound requests must not use global ID lookup");
 });
 
 test("waits briefly for an outgoing self-chat message that is still being saved", async () => {

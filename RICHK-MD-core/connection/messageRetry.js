@@ -1,4 +1,26 @@
 const { areJidsSameUser } = require("gifted-baileys");
+const { standardizeJid } = require("./serializer");
+const { getLidMapping } = require("./groupCache");
+
+const isPrivateChat = (jid) =>
+    jid.endsWith("@s.whatsapp.net") || jid.endsWith("@lid");
+
+function verifiedPrivateAliases(messageKey) {
+    const chat = standardizeJid(messageKey?.remoteJid);
+    const aliases = new Set([chat].filter(Boolean));
+    if (!isPrivateChat(chat)) return aliases;
+    const alternate = standardizeJid(messageKey?.remoteJidAlt);
+    // Only transport-supplied alternate addresses or known mappings are used.
+    // Sender PN identifies the author, not the outgoing message's recipient.
+    if (isPrivateChat(alternate)) aliases.add(alternate);
+    for (const jid of [...aliases]) {
+        if (jid.endsWith("@lid")) {
+            const phone = standardizeJid(getLidMapping(jid));
+            if (phone.endsWith("@s.whatsapp.net")) aliases.add(phone);
+        }
+    }
+    return aliases;
+}
 
 const isOwnChat = (jid, ownJids) =>
     Boolean(
@@ -36,6 +58,18 @@ async function findMessageForRetry(store, key, ownJids) {
                 isSelfChat,
             };
         }
+    } else if (key.fromMe && isPrivateChat(standardizeJid(key.remoteJid))) {
+        const alternate = await store.loadMessageById(key.id);
+        if (alternate?.key?.fromMe && alternate.message) {
+            const requested = verifiedPrivateAliases(key);
+            const saved = verifiedPrivateAliases(alternate.key);
+            const differentChat = standardizeJid(alternate.key.remoteJid) !== standardizeJid(key.remoteJid);
+            const matches = [...saved].some(jid => requested.has(jid));
+            const includesOwnChat = [...saved, ...requested].some(jid => isOwnChat(jid, ownJids));
+            if (differentChat && matches && !includesOwnChat) {
+                return { message: alternate.message, source: "alternate-private", isSelfChat: false };
+            }
+        }
     }
 
     return { message: undefined, source: "missing", isSelfChat };
@@ -44,7 +78,7 @@ async function findMessageForRetry(store, key, ownJids) {
 async function findMessageForRetryWithWait(store, key, ownJids, delays = [50, 150]) {
     let result = await findMessageForRetry(store, key, ownJids);
     for (const delay of delays) {
-        if (result.message || !result.isSelfChat) break;
+        if (result.message || !key?.fromMe) break;
         await new Promise((resolve) => setTimeout(resolve, delay));
         result = await findMessageForRetry(store, key, ownJids);
     }

@@ -142,5 +142,5 @@ test("self-chat sends are available to retry before the delayed own event", asyn
     assert.deepEqual(result.message, { text: "test reply" });
 
     await liveSocket.sendMessage("other@s.whatsapp.net", { text: "other chat" });
-    assert.equal(stored.length, 1, "other chats keep using the normal event-backed store");
+    assert.equal(stored.length, 2, "other chats also retain outgoing plaintext for retry recovery");
 });

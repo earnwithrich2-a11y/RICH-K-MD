@@ -21,7 +21,7 @@ function persistOwnOutgoingMessages(socket, store, userDevicesCache) {
             sent?.key?.fromMe &&
             sent.key.id &&
             sent.message &&
-            ownJids.includes(standardizeJid(sent.key.remoteJid))
+            sent.key.remoteJid
         ) {
             store.saveMessage(sent.key.remoteJid, sent);
         }

@@ -20,3 +20,21 @@ Extending an already-applied dependency patch can leave mixed applied/unapplied 
 **Why:** The installer checks the complete patch state; rejection in this situation does not by itself mean the new diff is malformed.
 
 **How to apply:** Bring the installed dependency into agreement with the complete patch using focused incremental edits, then verify installer idempotency and check the patch against a clean published package. Keep authentication data untouched.
+
+Device addresses must retain their own phone/LID namespace across discovery and retry routing, rather than inheriting the chat's namespace.
+
+**Why:** The installed fork discarded device namespaces and rebuilt addresses from the enclosing chat. Correcting that alone is insufficient when cached primary devices cause duplicate encryption targets or the sender's LID alias reappears in discovery.
+
+**How to apply:** Review namespace preservation together with cached primary-device filtering, duplicate-target removal, and exclusion of both authenticated sender aliases. Parse primary LIDs as addresses, not with a colon split that can leave the domain attached to the user.
+
+Diagnostic logging must use an explicit allowlist of fixed event names.
+
+**Why:** The transport's original logger accepts objects containing message bodies, personal addresses and key material; enabling generic debug logging to investigate retries can expose them.
+
+**How to apply:** Retain sanitized retry-stage and bundle-status events without forwarding arbitrary SDK objects or error stacks.
+
+Verify signature checks with both a valid control and a tampered negative control against the actual cryptographic primitive.
+
+**Why:** During certificate diagnostics, the SDK verification wrapper reported success for different message prefixes because it discarded the underlying library's false return value and only handled thrown errors. Strict primitive checks correctly rejected the altered control.
+
+**How to apply:** Do not use the SDK wrapper alone as evidence of valid signatures. For read-only certificate checks, select only public certificate fields, decode base64 byte strings correctly, and never query full credentials or private keys.

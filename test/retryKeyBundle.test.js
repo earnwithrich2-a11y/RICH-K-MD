@@ -50,18 +50,19 @@ const receiveSource = fs.readFileSync(
     require.resolve("gifted-baileys/lib/Socket/messages-recv"), "utf8",
 );
 
-function retryHarness(rejectBundle = false) {
+function retryHarness(rejectBundle = false, messageAvailable = true) {
     // Exercise the installed resender, not a separate approximation.
     const start = receiveSource.indexOf("const sendMessagesAgain =");
     const end = receiveSource.indexOf("const handleReceipt =", start);
     assert.ok(start >= 0 && end > start);
     const calls = [];
+    const missingAttempts = [];
     const resend = vm.runInNewContext(
         `(() => { ${receiveSource.slice(start, end)} return sendMessagesAgain; })()`,
         {
             Utils_1: utils,
             WABinary_1: binary,
-            getMessage: async () => ({ conversation: "Synthetic recovered message" }),
+            getMessage: async () => messageAvailable ? ({ conversation: "Synthetic recovered message" }) : undefined,
             assertSessions: async (...args) => calls.push(["server", ...args]),
             signalRepository: {
                 async injectE2ESession(value) {
@@ -71,11 +72,11 @@ function retryHarness(rejectBundle = false) {
             },
             authState: { keys: { set: async () => {} } },
             logger: { debug() {}, warn() {} },
-            updateSendMessageAgainCount() {},
+            updateSendMessageAgainCount(id, participant) { missingAttempts.push({ id, participant }); },
             relayMessage: async (...args) => calls.push(["relay", ...args]),
         },
     );
-    return { calls, resend };
+    return { calls, resend, missingAttempts };
 }
 
 const retryKey = {
@@ -83,6 +84,14 @@ const retryKey = {
     participant: "19999999999:3@lid",
 };
 const retryNode = { tag: "retry", attrs: { count: "2" } };
+
+test("missing retry payloads do not reset sessions, inject bundles or relay anything", async () => {
+    const { calls, resend, missingAttempts } = retryHarness(false, false);
+    await resend(retryKey, ["missing-one", "missing-two"], retryNode, receipt());
+    assert.deepEqual(calls, []);
+    assert.deepEqual(missingAttempts.map(entry => entry.id), ["missing-one", "missing-two"]);
+    assert.ok(missingAttempts.every(entry => entry.participant === retryKey.participant));
+});
 
 test("retry bundles validate required lengths and support optional one-time keys", () => {
     const valid = receipt();
@@ -207,7 +216,8 @@ test("self-chat diagnostics identify bundles and receipts without logging identi
     socket.ws.emit("CB:receipt", { attrs: {
         from: "19999999999@s.whatsapp.net", recipient: "15555555555@s.whatsapp.net", type: "retry",
     } });
-    assert.equal(logs.length, 3);
+    assert.equal(logs.length, 4);
+    assert.equal(logs[3], "[WhatsApp] DM retry: attempt=unknown; keyBundle=absent.");
     assert.ok(logs.every((line) => !/\d{8,}|@/.test(line)));
     socket.ev.emit("connection.update", { connection: "close" });
     assert.equal(socket.ws.listenerCount("CB:receipt"), 0);
