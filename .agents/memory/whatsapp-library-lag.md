@@ -33,6 +33,18 @@ Diagnostic logging must use an explicit allowlist of fixed event names.
 
 **How to apply:** Retain sanitized retry-stage and bundle-status events without forwarding arbitrary SDK objects or error stacks.
 
+Use the maintained upstream transport rather than indefinitely reconstructing modern WhatsApp addressing in the old fork. Preserve the active login during upgrades; fresh pairing requires separate user approval.
+
+**Why:** Multiple fork patches passed synthetic tests without producing readable phone-side replies. The fork lacked upstream domain-aware sessions, hosted-device addressing and native PN/LID session migration. The user approved an upstream upgrade but explicitly chose to keep the current login.
+
+**How to apply:** Let upstream own recipient fan-out and Signal session migration. Retain narrow durable-write and live-event protections, and validate them against the actual new transport rather than the retired fork's implementation.
+
+When moving from a domainless transport to domain-aware Signal addresses, preserving the login is not enough: known legacy LID session and sender-key records also need a non-destructive namespace migration.
+
+**Why:** The old fork stored LID keys under bare identifiers, while upstream looks for domain-qualified identifiers. Otherwise old encryption state remains present but unreadable by the new transport.
+
+**How to apply:** Use verified identity mappings, leave ambiguous identifiers unchanged, retain source records, and never overwrite sessions already advanced by upstream. Seed native mappings with transactional keys rather than a plain key store.
+
 Verify signature checks with both a valid control and a tampered negative control against the actual cryptographic primitive.
 
 **Why:** During certificate diagnostics, the SDK verification wrapper reported success for different message prefixes because it discarded the underlying library's false return value and only handled thrown errors. Strict primitive checks correctly rejected the altered control.

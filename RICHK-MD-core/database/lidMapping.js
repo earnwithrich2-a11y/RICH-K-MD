@@ -1,6 +1,6 @@
 const { DATABASE } = require("./database");
 const { DataTypes } = require("sequelize");
-const { globalLidMapping } = require("gifted-baileys/lib/Utils/lid-mapping");
+const { storeLidMapping } = require("../connection/groupCache");
 
 const LidMappingDB = DATABASE.define(
     "LidMapping",
@@ -31,11 +31,11 @@ async function loadPersistedLidMappings() {
         const rows = await LidMappingDB.findAll();
         let count = 0;
         for (const row of rows) {
-            globalLidMapping.set(row.lid, row.jid);
+            storeLidMapping(row.lid, row.jid);
             count++;
         }
         if (count > 0) {
-            console.log(`✅ Loaded ${count} persisted LID mappings into globalLidMapping`);
+            console.log(`✅ Loaded ${count} persisted LID mappings`);
         }
     } catch (err) {
         console.error("Failed to load persisted LID mappings:", err.message);
@@ -62,4 +62,9 @@ async function getLidMappingFromDb(lid) {
     }
 }
 
-module.exports = { loadPersistedLidMappings, persistLidMapping, getLidMappingFromDb };
+async function getPersistedLidMappings() {
+    await syncLidMappingTable();
+    return LidMappingDB.findAll({ attributes: ["lid", "jid"], raw: true });
+}
+
+module.exports = { loadPersistedLidMappings, persistLidMapping, getLidMappingFromDb, getPersistedLidMappings };

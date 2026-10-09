@@ -4,7 +4,7 @@ const { addTransactionCapability, makeCacheableSignalKeyStore } = require("gifte
 const { initAuthCreds, generateSignalPubKey, Curve } = require("gifted-baileys/lib/Utils");
 const { makeAtomicSignalRepository } = require("../RICHK-MD-core/connection/atomicSignalRepository");
 
-const logger = { trace() {}, warn() {} };
+const logger = { trace() {}, debug() {}, info() {}, warn() {}, error() {} };
 const options = { maxCommitRetries: 2, delayBetweenTriesMs: 1 };
 const latch = () => {
     let resolve;
@@ -159,7 +159,11 @@ test("SQLite key batches roll back if one key cannot be written", async () => {
     const source = fs.readFileSync(path.join(__dirname, "../RICHK-MD-core/gmdFunctions.js"), "utf8");
     const start = source.indexOf("async function useSQLiteAuthState(");
     const end = source.indexOf("const runtime =", start);
-    const load = new Function("require", "fs", "path", `${source.slice(start, end)}; return useSQLiteAuthState;`)(require, fs, path);
+    const coreRequire = require("node:module").createRequire(path.join(__dirname, "../RICHK-MD-core/gmdFunctions.js"));
+    const scopedRequire = id => id === "./database/lidMapping"
+        ? { getPersistedLidMappings: async () => [] }
+        : coreRequire(id);
+    const load = new Function("require", "fs", "path", `${source.slice(start, end)}; return useSQLiteAuthState;`)(scopedRequire, fs, path);
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "richk-atomic-keys-"));
     const file = path.join(dir, "session.db");
     let db;
@@ -178,18 +182,11 @@ test("SQLite key batches roll back if one key cannot be written", async () => {
     }
 });
 
-test("slow relay discovery does not block fresh crypto while writes stay atomic", async () => {
-    const fs = require("node:fs"), vm = require("node:vm");
-    const source = fs.readFileSync(require.resolve("gifted-baileys/lib/Socket/messages-send"), "utf8");
-    const begin = source.indexOf("const runRelayWork = config.atomicSignalOperations");
-    const end = source.indexOf("await runRelayWork", begin);
-    assert.ok(begin >= 0 && end > begin, "SDK relay must use the bounded crypto boundary");
+test("native keyed transactions keep fresh crypto available during unrelated waits", async () => {
     const sender = auth(), receiver = auth();
     const sending = makeAtomicSignalRepository(sender), receiving = makeAtomicSignalRepository(receiver);
     await sending.injectE2ESession({ jid: "15550000002@s.whatsapp.net", session: bundle(receiver) });
-    const runRelay = vm.runInNewContext(`${source.slice(begin, end)}; runRelayWork`, {
-        config: { atomicSignalOperations: true }, authState: sender,
-    });
+    const runRelay = work => sender.keys.transaction(work, "historical-relay");
     const entered = latch(), discovery = latch();
     const historicalRetry = runRelay(async () => {
         entered.resolve();
@@ -199,7 +196,7 @@ test("slow relay discovery does not block fresh crypto while writes stay atomic"
     await entered.promise;
     try {
         const fresh = await Promise.race([
-            runRelay(() => sending.encryptMessage({ jid: "15550000002@s.whatsapp.net", data: Buffer.from("Fresh Pong") })),
+            sending.encryptMessage({ jid: "15550000002@s.whatsapp.net", data: Buffer.from("Fresh Pong") }),
             new Promise((_, reject) => {
                 const timer = setTimeout(() => reject(new Error("fresh reply blocked by discovery")), 500);
                 timer.unref();
@@ -224,11 +221,17 @@ test("pre-key uploads persist private keys before a slow server query and leave 
     const receiving = makeAtomicSignalRepository(receiver), entered = latch(), response = latch();
     await sending.injectE2ESession({ jid: "15550000002@s.whatsapp.net", session: bundle(receiver) });
     const upload = vm.runInNewContext(`${source.slice(begin, end)}; uploadPreKeys`, {
+        uploadPreKeysPromise: undefined,
+        MIN_PREKEY_COUNT: 1,
+        UPLOAD_TIMEOUT: 10000,
+        Boom: require("@hapi/boom").Boom,
+        getNextPreKeysNode: require("gifted-baileys").getNextPreKeysNode,
+        setTimeout: (work, ms) => { const timer = setTimeout(work, ms); timer.unref(); return timer; },
         Defaults_1: { INITIAL_PREKEY_COUNT: 1 },
         Utils_1: require("gifted-baileys/lib/Utils"),
         creds: sender.creds,
         keys: sender.keys,
-        logger: { info() {} },
+        logger: { debug() {}, info() {}, error() {} },
         ev: { emit(_, update) { Object.assign(sender.creds, update); } },
         async query() {
             assert.ok(Object.keys(sender.state.data["pre-key"] || {}).length > 0, "private keys must already be durable");

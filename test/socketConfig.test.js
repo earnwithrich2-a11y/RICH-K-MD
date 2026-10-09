@@ -18,9 +18,8 @@ test("socket initializes WhatsApp state needed to decrypt new messages", () => {
 
     assert.equal(config.fireInitQueries, true);
     assert.equal(config.syncFullHistory, false);
-    assert.equal(config.syncAppState, false);
+    assert.equal(config.makeSignalRepository, undefined, "native upstream repository owns LID migration");
     assert.equal(config.bufferLiveMessages, false);
-    assert.equal(config.prioritizeLiveMessages, true);
     assert.equal(config.shouldSyncHistoryMessage(), false);
     assert.equal(config.retryRequestDelayMs, 250);
     assert.equal(config.maxMsgRetryCount, 5);

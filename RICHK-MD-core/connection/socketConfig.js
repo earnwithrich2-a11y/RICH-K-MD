@@ -1,9 +1,7 @@
 const NodeCache = require('node-cache');
 const { makeCacheableSignalKeyStore } = require('gifted-baileys');
 const { cachedGroupMetadata } = require('./groupCache');
-const { prepareSelfChatRecipients } = require('./selfChatTransport');
 const { createTransportLogger } = require('./transportLogger');
-const { makeAtomicSignalRepository } = require('./atomicSignalRepository');
 
 const _userDevicesCache = new NodeCache({ stdTTL: 1800, useClones: false });
 
@@ -16,10 +14,6 @@ const createSocketConfig = (version, state, logger) => {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger)
         },
-        makeSignalRepository: makeAtomicSignalRepository,
-        // Crypto operations commit atomically in the repository. Discovery,
-        // group metadata queries and socket writes must not hold that lock.
-        atomicSignalOperations: true,
         cachedGroupMetadata,
         userDevicesCache: _userDevicesCache,
         connectTimeoutMs: 15000,
@@ -28,9 +22,7 @@ const createSocketConfig = (version, state, logger) => {
         fireInitQueries: true,
         markOnlineOnConnect: true,
         syncFullHistory: false,
-        syncAppState: false,
         bufferLiveMessages: false,
-        prioritizeLiveMessages: true,
         shouldSyncHistoryMessage: () => false,
         retryRequestDelayMs: 250,
         maxMsgRetryCount: 5,
@@ -56,7 +48,9 @@ const createSocketConfig = (version, state, logger) => {
                     },
                 };
             }
-            return prepareSelfChatRecipients(message, jids, state.creds.me);
+            // Upstream owns recipient fan-out and device-sent copies. Its
+            // per-recipient format differs from the retired fork's flat form.
+            return message;
         }
     };
 };

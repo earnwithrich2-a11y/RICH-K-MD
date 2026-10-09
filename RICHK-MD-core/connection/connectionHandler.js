@@ -101,13 +101,8 @@ const setupConnectionHandler = (
             switch (reason) {
                 case DisconnectReason.badSession:
                     console.log(
-                        "Bad session file, automatically deleted...please scan again",
+                        "WhatsApp rejected the session. Login data is preserved; re-pairing requires approval.",
                     );
-                    try {
-                        await fs.remove(sessionDir);
-                    } catch (e) {
-                        console.error("Failed to remove session:", e);
-                    }
                     process.exit(1);
                     break;
 
@@ -120,13 +115,8 @@ const setupConnectionHandler = (
 
                 case DisconnectReason.loggedOut:
                     console.log(
-                        "Device logged out, session file automatically deleted...please scan again",
+                        "WhatsApp reported a logout. Login data is preserved; re-pairing requires approval.",
                     );
-                    try {
-                        await fs.remove(sessionDir);
-                    } catch (e) {
-                        console.error("❌ Failed to remove session:", e);
-                    }
                     process.exit(1);
                     break;
 

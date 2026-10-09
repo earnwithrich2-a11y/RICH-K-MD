@@ -523,6 +523,11 @@ async function useSQLiteAuthState(databasePath) {
         db.close();
         throw new Error("No usable session credentials. Check SESSION_ID or the session database.");
     }
+    const { getPersistedLidMappings } = require("./database/lidMapping");
+    const { collectIdentityPairs, migrateLegacyLidKeys, seedNativeLidMappings } = require("./connection/legacyAddressMigration");
+    const identityPairs = collectIdentityPairs(db, await getPersistedLidMappings(), creds.me);
+    const migrated = migrateLegacyLidKeys(db, identityPairs);
+    if (migrated) console.info("[WhatsApp] Legacy LID encryption-state migration completed.");
     const writeKeys = db.transaction((data) => {
         for (const category in data) {
             for (const id in data[category]) {
@@ -534,7 +539,7 @@ async function useSQLiteAuthState(databasePath) {
         }
     });
 
-    return {
+    const result = {
         state: {
             creds,
             keys: {
@@ -557,6 +562,8 @@ async function useSQLiteAuthState(databasePath) {
             writeData('creds', creds);
         }
     };
+    await seedNativeLidMappings(result.state.keys, identityPairs);
+    return result;
 }
 
 const runtime = (seconds) => {
