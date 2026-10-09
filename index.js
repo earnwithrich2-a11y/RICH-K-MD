@@ -996,6 +996,8 @@ function setupCommandHandler(Gifted) {
 
 function setupGiftedHelpers(Gifted, from) {
     Gifted.getJidFromLid = async (lid) => {
+        const native = await Gifted.signalRepository?.lidMapping?.getPNForLID(lid);
+        if (native) return native;
         const groupMetadata = await getGroupMetadata(Gifted, from);
         if (!groupMetadata) return null;
         const match = groupMetadata.participants.find(
@@ -1005,6 +1007,8 @@ function setupGiftedHelpers(Gifted, from) {
     };
 
     Gifted.getLidFromJid = async (jid) => {
+        const native = await Gifted.signalRepository?.lidMapping?.getLIDForPN(jid);
+        if (native) return native;
         const groupMetadata = await getGroupMetadata(Gifted, from);
         if (!groupMetadata) return null;
         const match = groupMetadata.participants.find(

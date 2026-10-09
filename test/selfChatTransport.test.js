@@ -51,7 +51,7 @@ test("a sender-only retry cannot generate an empty encrypted stanza", () => {
     }, ["789:2@lid"], me), /sending device/);
 });
 
-test("self-chat refreshes device discovery, preserves options and stores the routed send", async () => {
+test("outgoing persistence preserves native upstream routing and options", async () => {
     const calls = [];
     const saved = [];
     const cleared = [];
@@ -69,15 +69,15 @@ test("self-chat refreshes device discovery, preserves options and stores the rou
     );
     const quoted = { key: { id: "quoted" } };
     await socket.sendMessage("123@s.whatsapp.net", { text: "hello" }, { quoted });
-    assert.equal(calls[0][0], "789@lid");
+    assert.equal(calls[0][0], "123@s.whatsapp.net");
     assert.deepEqual(calls[0][2], { quoted });
-    assert.deepEqual(cleared, [["123", "789"]]);
-    assert.equal(saved[0][0], "789@lid");
+    assert.deepEqual(cleared, []);
+    assert.equal(saved[0][0], "123@s.whatsapp.net");
 
     await socket.sendMessage("456@s.whatsapp.net", { text: "other" });
     assert.equal(calls[1].length, 2);
     assert.equal(calls[1][0], "456@s.whatsapp.net");
     assert.equal(saved.length, 2, "direct messages are saved immediately for retry recovery");
     assert.equal(saved[1][0], "456@s.whatsapp.net");
-    assert.equal(cleared.length, 1, "other chats do not invalidate device discovery");
+    assert.equal(cleared.length, 0, "native upstream owns device discovery");
 });

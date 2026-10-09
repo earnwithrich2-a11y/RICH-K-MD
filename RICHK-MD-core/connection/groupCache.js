@@ -26,7 +26,7 @@ const updateLidMappingsFromMetadata = (metadata) => {
     if (!metadata?.participants) return;
     for (const p of metadata.participants) {
         const lid = p.lid || p.id;
-        const jid = p.pn || p.jid;
+        const jid = p.pn || p.phoneNumber || p.jid;
         if (lid && jid) {
             storeLidMapping(lid, jid);
         }

@@ -1,4 +1,11 @@
 const test = require("node:test");
+test("connection failures preserve the active login and its protected migration backup", () => {
+    const handler = require("node:fs").readFileSync(
+        require.resolve("../RICHK-MD-core/connection/connectionHandler"), "utf8",
+    );
+    require("node:assert/strict").doesNotMatch(handler, /fs\.(?:remove|rm|unlink)(?:Sync)?\s*\(/);
+    require("node:assert/strict").match(handler, /re-pairing requires approval/);
+});
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");

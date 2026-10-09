@@ -138,7 +138,7 @@ test("self-chat sends are available to retry before the delayed own event", asyn
         { remoteJid: ownLid, fromMe: true, id: "test-outgoing" },
         [ownPn, ownLid],
     );
-    assert.equal(result.source, "exact");
+    assert.equal(result.source, "alternate-self");
     assert.deepEqual(result.message, { text: "test reply" });
 
     await liveSocket.sendMessage("other@s.whatsapp.net", { text: "other chat" });
