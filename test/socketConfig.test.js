@@ -18,7 +18,7 @@ test("socket initializes WhatsApp state needed to decrypt new messages", () => {
 
     assert.equal(config.fireInitQueries, true);
     assert.equal(config.syncFullHistory, false);
-    assert.equal(config.makeSignalRepository, undefined, "native upstream repository owns LID migration");
+    assert.equal(typeof config.makeSignalRepository, "function", "bungoma crypto writes require the protected repository");
     assert.equal(config.bufferLiveMessages, false);
     assert.equal(config.shouldSyncHistoryMessage(), false);
     assert.equal(config.retryRequestDelayMs, 250);

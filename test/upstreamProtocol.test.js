@@ -38,10 +38,12 @@ function decode(bytes) {
     return sdk.proto.Message.decode(sdk.unpadRandomMax16(Buffer.from(bytes)));
 }
 
-test("the bot imports the maintained upstream package through its compatibility alias", () => {
-    const pkg = require("gifted-baileys/package.json");
-    assert.equal(pkg.name, "@whiskeysockets/baileys");
-    assert.equal(pkg.version, "7.0.0-rc14");
+test("legacy plugin imports and the actual socket use the requested bungoma alias", () => {
+    const pkg = require("@whiskeysockets/baileys/package.json");
+    assert.equal(pkg.name, "bungoma");
+    assert.equal(pkg.version, "1.1.1");
+    assert.equal(require("../package.json").dependencies["@whiskeysockets/baileys"], "npm:bungoma");
+    assert.equal(sdk.default, require("@whiskeysockets/baileys").default);
 });
 
 test("phone, LID and hosted-device session addresses cannot collide", () => {
