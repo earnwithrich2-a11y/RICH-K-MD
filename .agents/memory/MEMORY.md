@@ -1,5 +1,6 @@
 - [Self-chat decryption verification](self-chat-decryption.md) — connection and send success do not prove phone-side decryption; preserve the active login during investigation.
 - [WhatsApp library lag](whatsapp-library-lag.md) — the latest published fork can still omit upstream retry fixes; compare behavior before replacing the login.
+- [Device certificate prefixes](device-certificate-prefix.md) — hosted-account flags must not select the linked-device signature prefix; SDK upgrades do not repair imported certificates.
 - [Bot command readiness](bot-command-readiness.md) — check processing queues as well as event buffering; keep retries and background sync off the live-message path.
 - [Social greeting tone](social-greeting-tone.md) — love, goodnight, and goodmorning should send varied sweet text, not one fixed greeting.
 - [Outgoing command routing](outgoing-command-routing.md) — commands sent by the linked bot account to other people's chats should reply there, not in self-chat.
