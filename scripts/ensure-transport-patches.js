@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const REQUIRED_PATCHES = [
-    "gifted-baileys+7.0.0-rc14.patch",
+    "@whiskeysockets+baileys+1.1.1.patch",
     "libsignal+6.0.0.patch",
 ];
 

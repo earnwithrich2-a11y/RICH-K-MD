@@ -14,7 +14,21 @@ function createTransportLogger(log = console.info) {
     const emit = (...args) => {
         for (const arg of args) {
             if (typeof arg !== "string" || !EVENTS.has(arg)) continue;
-            log(`[WhatsApp] ${EVENTS.get(arg)}`);
+            const trace = args.find(value => value && typeof value === "object" && typeof value.trace === "string")?.trace || "";
+            let reason = "";
+            if (arg === "error in sending message again") {
+                const categories = [
+                    [/Device 99 requires a hosted address/, "NON_HOSTED_DEVICE_99"],
+                    [/No sessions|No session|No open session|SessionError/, "SESSION_UNAVAILABLE"],
+                    [/UntrustedIdentity/, "RECIPIENT_IDENTITY_CHANGED"],
+                    [/Bad MAC|BadMac|Invalid signature/, "RECIPIENT_KEY_REJECTED"],
+                    [/Connection Closed|Timed Out|Timeout/, "NETWORK_UNAVAILABLE"],
+                    [/Cannot destructure property 'user'|reading 'user'|reading 'split'/, "INVALID_RECIPIENT_ADDRESS"],
+                    [/TypeError/, "TRANSPORT_TYPE_ERROR"],
+                ];
+                reason = categories.find(([pattern]) => pattern.test(trace))?.[1] || "OTHER";
+            }
+            log(`[WhatsApp] ${EVENTS.get(arg)}${reason ? ` Category: ${reason}` : ""}`);
             break;
         }
     };

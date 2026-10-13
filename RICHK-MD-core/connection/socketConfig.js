@@ -2,6 +2,7 @@ const NodeCache = require('node-cache');
 const { makeCacheableSignalKeyStore } = require('gifted-baileys');
 const { cachedGroupMetadata } = require('./groupCache');
 const { createTransportLogger } = require('./transportLogger');
+const { makeAtomicSignalRepository } = require('./atomicSignalRepository');
 
 const _userDevicesCache = new NodeCache({ stdTTL: 1800, useClones: false });
 
@@ -14,6 +15,10 @@ const createSocketConfig = (version, state, logger) => {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger)
         },
+        makeSignalRepository: makeAtomicSignalRepository,
+        atomicSignalOperations: true,
+        prioritizeLiveMessages: true,
+        transactionOpts: { maxCommitRetries: 3, delayBetweenTriesMs: 10 },
         cachedGroupMetadata,
         userDevicesCache: _userDevicesCache,
         connectTimeoutMs: 15000,

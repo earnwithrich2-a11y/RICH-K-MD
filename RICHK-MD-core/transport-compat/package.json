@@ -1,0 +1,16 @@
+{
+  "name": "gifted-baileys",
+  "version": "1.0.0-local",
+  "private": true,
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./lib/Utils": "./utils.js",
+    "./lib/Utils/auth-utils": "./auth-utils.js",
+    "./lib/Utils/event-buffer": "./event-buffer.js",
+    "./lib/Utils/logger": "./logger.js",
+    "./lib/Signal/libsignal": "./signal.js",
+    "./lib/Signal/lid-mapping": "./lid-mapping.js",
+    "./lib/WABinary": "./binary.js"
+  }
+}

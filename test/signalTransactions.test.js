@@ -214,7 +214,7 @@ test("native keyed transactions keep fresh crypto available during unrelated wai
 
 test("pre-key uploads persist private keys before a slow server query and leave crypto available", async () => {
     const fs = require("node:fs"), vm = require("node:vm");
-    const source = fs.readFileSync(require.resolve("gifted-baileys/lib/Socket/socket"), "utf8");
+    const source = fs.readFileSync(require.resolve("@whiskeysockets/baileys/lib/Socket/socket"), "utf8");
     const begin = source.indexOf("const uploadPreKeys = async");
     const end = source.indexOf("const uploadPreKeysToServerIfRequired", begin);
     const sender = auth(), receiver = auth(), sending = makeAtomicSignalRepository(sender);

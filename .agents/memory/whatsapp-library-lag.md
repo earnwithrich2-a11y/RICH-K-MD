@@ -33,11 +33,17 @@ Diagnostic logging must use an explicit allowlist of fixed event names.
 
 **How to apply:** Retain sanitized retry-stage and bundle-status events without forwarding arbitrary SDK objects or error stacks.
 
-Use the maintained upstream transport rather than indefinitely reconstructing modern WhatsApp addressing in the old fork. Preserve the active login during upgrades; fresh pairing requires separate user approval.
+The user requested the transport alias `"@whiskeysockets/baileys": "npm:bungoma"` and approved carrying encryption protections into that transport. Preserve the active login during upgrades; fresh pairing requires separate approval.
 
-**Why:** Multiple fork patches passed synthetic tests without producing readable phone-side replies. The fork lacked upstream domain-aware sessions, hosted-device addressing and native PN/LID session migration. The user approved an upstream upgrade but explicitly chose to keep the current login.
+**Why:** Multiple fork patches passed synthetic tests without producing readable phone-side replies. After approving an upstream upgrade, the user requested Bungoma with protections rather than an unprotected package swap.
 
-**How to apply:** Let upstream own recipient fan-out and Signal session migration. Retain narrow durable-write and live-event protections, and validate them against the actual new transport rather than the retired fork's implementation.
+**How to apply:** Use the requested transport without discarding domain-aware sessions, isolated key transactions, durable-write ordering or live-event protections. Validate the actual selected transport, not a second SDK left installed for tests.
+
+Device discovery can list hosted device 99 under an ordinary PN/LID parent. Do not infer a hosted Signal address solely from the device number.
+
+**Why:** Live Bungoma resends reached recipient-key preparation but then failed on a non-hosted device-99 target discovered during fan-out. Ordinary phones still need their valid delivery targets; weakening the namespace check is not a safe repair.
+
+**How to apply:** Exclude device 99 from discovery unless the result explicitly uses a hosted namespace. Keep strict address validation and test both ordinary-device exclusion and explicit hosted-device retention.
 
 When moving from a domainless transport to domain-aware Signal addresses, preserving the login is not enough: known legacy LID session and sender-key records also need a non-destructive namespace migration.
 
