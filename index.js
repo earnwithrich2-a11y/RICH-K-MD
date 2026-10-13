@@ -192,6 +192,11 @@ async function startGifted() {
         const { version } = await fetchLatestWaWebVersion();
         const sessionDbPath = path.join(sessionDir, "session.db");
         const { state, saveCreds } = await useSQLiteAuthState(sessionDbPath);
+        const { repairLegacyDeviceSignature } = require("./RICHK-MD-core/connection/deviceIdentitySignature");
+        if (repairLegacyDeviceSignature(state.creds).repaired) {
+            await saveCreds();
+            console.info("[WhatsApp] Legacy device certificate signing prefix corrected; login keys retained.");
+        }
 
         if (store) store.destroy();
         store = new SQLiteStore();
