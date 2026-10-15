@@ -93,6 +93,27 @@ function offlineProcessor(context) {
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test("timestamp-verified fresh offline messages bypass stalled history without promoting old or undated packets", async () => {
+    let release, entered;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const started = new Promise(resolve => { entered = resolve; });
+    const seen = [];
+    const notification = async () => { entered(); await waiting; };
+    const message = async node => { seen.push(node.attrs.id); };
+    const process = offlineProcessor({ handleNotification: notification, handleMessage: message });
+    process("notification", { attrs: { offline: "1" } }, "", notification);
+    await started;
+    const timestamp = Math.floor(Date.now() / 1000);
+    for (const [id, t] of [["old", timestamp - 3600], ["undated", undefined], ["future", timestamp + 3600], ["fresh", timestamp]]) {
+        process("message", { attrs: { id, offline: "1", t } }, "", message);
+    }
+    await settle();
+    assert.deepEqual(seen, ["fresh"]);
+    release();
+    await settle();
+    assert.deepEqual(seen, ["fresh", "old", "undated", "future"]);
+});
+
 test("offline retry receipts cannot block a fresh offline command", async () => {
     let release, started, received = 0, flushes = 0;
     const waiting = new Promise(resolve => { release = resolve; });

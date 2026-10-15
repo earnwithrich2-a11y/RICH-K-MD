@@ -31,7 +31,7 @@ Check the offline packet dispatcher as well as receipt and message mutexes.
 
 **Why:** Separating retry work from the live processing mutex does not help if the SDK's outer offline dispatcher still awaits that same retry before forwarding the next message. An exception can also leave its busy flag set indefinitely. This is a demonstrated liveness risk, not by itself proof of the cause of every silent command.
 
-**How to apply:** Route offline receipts through their independent receipt path when live-message prioritization is enabled. Preserve message ordering and atomic Signal operations; catch failures per queued packet and release queue/buffer ownership in finally blocks. Verify with a deliberately stalled offline retry followed by an offline message, and with a failed packet followed by later arrivals.
+**How to apply:** Route offline receipts through their independent receipt path when live-message prioritization is enabled. Fresh messages need timestamp validation and bypass of the outer history queue, not just promotion to notify after it; otherwise a stalled old placeholder recovery still prevents them from reaching the processing mutex. Preserve crypto serialization and historical-message ordering; catch failures per queued packet and release queue/buffer ownership in finally blocks. Verify with deliberately stalled historical work followed by fresh, old, undated and future-dated messages. These checks establish liveness, not phone-side success.
 
 Distinguish the linked WhatsApp account from the configured bot owner.
 

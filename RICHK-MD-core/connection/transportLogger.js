@@ -8,6 +8,10 @@ const EVENTS = new Map([
     ["retry message unavailable; preserving sessions", "Retry payload unavailable; encryption sessions preserved."],
     ["will not send message again, as sent too many times", "Retry attempt limit reached."],
     ["blacklisting dead device", "Recipient key lookup failed; device excluded by transport."],
+    ["unexpected error in 'processing offline node'", "Offline packet processing failed."],
+    ["unexpected error in 'processing offline nodes'", "Offline queue processing failed."],
+    ["unexpected error in 'processing message'", "Incoming packet processing failed."],
+    ["error in handling message", "Incoming message processing failed."],
 ]);
 
 function createTransportLogger(log = console.info) {
@@ -16,6 +20,14 @@ function createTransportLogger(log = console.info) {
             if (typeof arg !== "string" || !EVENTS.has(arg)) continue;
             const trace = args.find(value => value && typeof value === "object" && typeof value.trace === "string")?.trace || "";
             let reason = "";
+            const failure = args.find(value => value && typeof value === "object" && (value.err || value.error));
+            const error = failure?.err || failure?.error;
+            let location = "";
+            if (error) {
+                const kind = ["TypeError", "RangeError", "Error", "Boom"].includes(error.name) ? error.name : "OTHER";
+                const frame = String(error.stack || "").match(/\/lib\/([a-zA-Z0-9_/-]+\.js):(\d+):(\d+)/);
+                location = ` Error: ${kind}.${frame ? ` SDK: ${frame[1]}:${frame[2]}:${frame[3]}.` : ""}`;
+            }
             if (arg === "error in sending message again") {
                 const categories = [
                     [/Device 99 requires a hosted address/, "NON_HOSTED_DEVICE_99"],
@@ -28,7 +40,7 @@ function createTransportLogger(log = console.info) {
                 ];
                 reason = categories.find(([pattern]) => pattern.test(trace))?.[1] || "OTHER";
             }
-            log(`[WhatsApp] ${EVENTS.get(arg)}${reason ? ` Category: ${reason}` : ""}`);
+            log(`[WhatsApp] ${EVENTS.get(arg)}${reason ? ` Category: ${reason}` : ""}${location}`);
             break;
         }
     };
