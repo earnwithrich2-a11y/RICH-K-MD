@@ -33,6 +33,12 @@ Check the offline packet dispatcher as well as receipt and message mutexes.
 
 **How to apply:** Route offline receipts through their independent receipt path when live-message prioritization is enabled. Fresh messages need timestamp validation and bypass of the outer history queue, not just promotion to notify after it; otherwise a stalled old placeholder recovery still prevents them from reaching the processing mutex. Preserve crypto serialization and historical-message ordering; catch failures per queued packet and release queue/buffer ownership in finally blocks. Verify with deliberately stalled historical work followed by fresh, old, undated and future-dated messages. These checks establish liveness, not phone-side success.
 
+Do not await phone-side placeholder recovery in the offline message dispatcher.
+
+**Why:** Runtime counters showed encrypted offline packets arriving but no message events or processing-mutex work. Moving unavailable-message recovery to an independently serialized background path drained the offline queue and allowed decrypted messages to reach handlers. Prior receipt isolation and fresh timestamp promotion alone did not restore intake.
+
+**How to apply:** Acknowledge unavailable packets promptly, schedule deduplicated recovery separately, handle background failures, and keep actual Signal operations serialized. Confirm both queue progress and fresh phone-side command behavior; old commands must not replay just because recovery resumes.
+
 Distinguish the linked WhatsApp account from the configured bot owner.
 
 **Why:** Owner settings grant command permissions; they do not change the active WhatsApp login. A separate bot account is valid, but self-chat on another account does not reach it.

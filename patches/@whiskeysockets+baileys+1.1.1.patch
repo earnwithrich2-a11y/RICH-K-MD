@@ -231,11 +231,12 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js b/
 diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
 --- a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
 +++ b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
-@@ -21,6 +21,7 @@
+@@ -21,6 +21,8 @@
      const { ev, authState, ws, processingMutex, signalRepository, query, upsertMessage, resyncAppState, onUnexpectedError, assertSessions, sendNode, relayMessage, sendReceipt, uploadPreKeys, sendPeerDataOperationMessage } = sock;
      /** this mutex ensures that each retryRequest will wait for the previous one to finish */
      const retryMutex = (0, make_mutex_1.makeMutex)();
 +    const receiptMutex = (0, make_mutex_1.makeMutex)();
++    const placeholderResendMutex = (0, make_mutex_1.makeMutex)();
      const msgRetryCache = config.msgRetryCounterCache ||
          new node_cache_1.default({
              stdTTL: Defaults_1.DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
@@ -312,7 +313,19 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/
          }
      };
      const handleNotification = async (node) => {
-@@ -840,8 +851,12 @@
+@@ -642,6 +654,11 @@
+         if ((0, WABinary_1.getBinaryNodeChild)(node, 'unavailable') && !encNode) {
+             await sendMessageAck(node);
+             const { key } = (0, Utils_1.decodeMessageNode)(node, authState.creds.me.id, authState.creds.me.lid || '').fullMessage;
++            if (config.prioritizeLiveMessages) {
++                placeholderResendMutex.mutex(() => requestPlaceholderResend(key))
++                    .catch(error => onUnexpectedError(error, 'recovering unavailable message'));
++                return;
++            }
+             response = await requestPlaceholderResend(key);
+             if (response === 'RESOLVED') {
+                 return;
+@@ -840,8 +857,12 @@
          ev.buffer();
 -        await execTask();
 -        ev.flush();
@@ -327,7 +340,16 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/
          }
      };
      const makeOfflineNodeProcessor = () => {
-@@ -863,18 +878,27 @@
+@@ -854,6 +869,8 @@
+         const nodes = [];
+         let isProcessing = false;
++        let activeType;
++        let activeSince;
+         const enqueue = (type, node) => {
+             nodes.push({ type, node });
+             if (isProcessing) {
+                 return;
+@@ -863,18 +880,37 @@
              isProcessing = true;
              const promise = async () => {
 -                while (nodes.length && ws.isOpen) {
@@ -345,10 +367,16 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/
 +                            continue;
 +                        }
 +                        try {
++                            activeType = type;
++                            activeSince = Date.now();
 +                            await nodeProcessor(node);
 +                        }
 +                        catch (error) {
 +                            onUnexpectedError(error, 'processing offline node');
++                        }
++                        finally {
++                            activeType = undefined;
++                            activeSince = undefined;
 +                        }
                      }
 -                    await nodeProcessor(node);
@@ -360,10 +388,15 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/
              };
              promise().catch(error => onUnexpectedError(error, 'processing offline nodes'));
          };
-         return { enqueue };
+-        return { enqueue };
++        return { enqueue, snapshot: () => ({
++            pending: nodes.length,
++            activeType: activeType || null,
++            activeForMs: activeSince === undefined ? null : Date.now() - activeSince,
++        }) };
      };
      const offlineNodeProcessor = makeOfflineNodeProcessor();
-@@ -883,8 +907,12 @@
+@@ -883,8 +919,12 @@
      const offlineNodeProcessor = makeOfflineNodeProcessor();
 +    const receiveStartedAt = Date.now();
      const processNode = (type, node, identifier, exec) => {
@@ -377,3 +410,11 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/
          }
          else {
              processNodeWithBuffer(node, identifier, exec);
+@@ -1088,6 +1128,7 @@
+     return {
+         ...sock,
++        getOfflineQueueState: () => offlineNodeProcessor.snapshot(),
+         sendMessageAck,
+         sendRetryRequest,
+         rejectCall,
+         fetchMessageHistory,

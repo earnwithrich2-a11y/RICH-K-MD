@@ -12,6 +12,7 @@ const EVENTS = new Map([
     ["unexpected error in 'processing offline nodes'", "Offline queue processing failed."],
     ["unexpected error in 'processing message'", "Incoming packet processing failed."],
     ["error in handling message", "Incoming message processing failed."],
+    ["unexpected error in 'recovering unavailable message'", "Background message recovery failed."],
 ]);
 
 function createTransportLogger(log = console.info) {

@@ -61,6 +61,7 @@ function attachCommandDiagnostics(socket, now = Date.now) {
                     activeForMs: age(activeSince),
                     oldestWaitingMs: age(waiting.values().next().value?.at),
                 },
+                offline: socket.getOfflineQueueState?.(),
             };
         },
     };
