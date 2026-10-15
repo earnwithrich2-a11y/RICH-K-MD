@@ -39,6 +39,12 @@ Do not await phone-side placeholder recovery in the offline message dispatcher.
 
 **How to apply:** Acknowledge unavailable packets promptly, schedule deduplicated recovery separately, handle background failures, and keep actual Signal operations serialized. Confirm both queue progress and fresh phone-side command behavior; old commands must not replay just because recovery resumes.
 
+The user confirmed a fresh readable self-chat `.ping` on 2026-10-15 after background placeholder recovery was separated from intake.
+
+**Why:** Earlier queue changes passed automated tests but the user still reported no replies. The later runtime evidence showed the backlog draining, fresh events arriving, and then the user explicitly confirmed readable output.
+
+**How to apply:** Treat this as confirmation of that fresh self-chat command only, not of every external-service command, historical message, or peer device. Preserve the working login and recovery isolation.
+
 Distinguish the linked WhatsApp account from the configured bot owner.
 
 **Why:** Owner settings grant command permissions; they do not change the active WhatsApp login. A separate bot account is valid, but self-chat on another account does not reach it.
