@@ -93,6 +93,39 @@ function offlineProcessor(context) {
 
 const settle = () => new Promise(resolve => setImmediate(resolve));
 
+test("an unavailable message is acknowledged without awaiting phone recovery or entering crypto processing", async () => {
+    const start = source.indexOf("const handleMessage =");
+    const end = source.indexOf("const fetchMessageHistory =", start);
+    let release, recovered, acked = 0, requests = 0;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { recovered = resolve; });
+    const errors = [];
+    const handle = vm.runInNewContext(`${source.slice(start, end)}; handleMessage`, {
+        config: { prioritizeLiveMessages: true },
+        WABinary_1: sdk, logger,
+        authState: { creds: { me: { id: "15550000001:4@s.whatsapp.net" } } },
+        shouldIgnoreJid: () => false,
+        sendMessageAck: async () => { acked++; },
+        Utils_1: {
+            decodeMessageNode: () => ({ fullMessage: { key: { id: "synthetic" } } }),
+            decryptMessageNode: () => { throw new Error("Unavailable packet must not enter crypto"); },
+        },
+        placeholderResendMutex: { mutex: work => Promise.resolve().then(work) },
+        requestPlaceholderResend: async () => { requests++; recovered(); await waiting; throw new Error("Synthetic recovery error"); },
+        onUnexpectedError: error => errors.push(error),
+    });
+    await handle({
+        tag: "message", attrs: { from: "15550000002@s.whatsapp.net", id: "synthetic", offline: "1" },
+        content: [{ tag: "unavailable", attrs: {} }],
+    });
+    await entered;
+    assert.equal(acked, 1);
+    assert.equal(requests, 1);
+    release();
+    await settle();
+    assert.equal(errors.length, 1, "background recovery rejection must be handled");
+});
+
 test("timestamp-verified fresh offline messages bypass stalled history without promoting old or undated packets", async () => {
     let release, entered;
     const waiting = new Promise(resolve => { release = resolve; });
