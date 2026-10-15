@@ -27,6 +27,12 @@ Verify the processing path before event emission as well as event delivery. Retr
 
 **How to apply:** Keep retry work ordered per requesting device without making other incoming messages wait for it; retain Signal's cryptographic serialization and key validation. Acknowledge received retry packets independently of slow resends. Use trusted timestamps to distinguish fresh reconnect traffic from history, and prevent a failed packet from leaving a queue permanently marked busy.
 
+Check the offline packet dispatcher as well as receipt and message mutexes.
+
+**Why:** Separating retry work from the live processing mutex does not help if the SDK's outer offline dispatcher still awaits that same retry before forwarding the next message. An exception can also leave its busy flag set indefinitely. This is a demonstrated liveness risk, not by itself proof of the cause of every silent command.
+
+**How to apply:** Route offline receipts through their independent receipt path when live-message prioritization is enabled. Preserve message ordering and atomic Signal operations; catch failures per queued packet and release queue/buffer ownership in finally blocks. Verify with a deliberately stalled offline retry followed by an offline message, and with a failed packet followed by later arrivals.
+
 Distinguish the linked WhatsApp account from the configured bot owner.
 
 **Why:** Owner settings grant command permissions; they do not change the active WhatsApp login. A separate bot account is valid, but self-chat on another account does not reach it.

@@ -312,3 +312,63 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/
          }
      };
      const handleNotification = async (node) => {
+@@ -840,8 +851,12 @@
+         ev.buffer();
+-        await execTask();
+-        ev.flush();
++        try {
++            await execTask();
++        }
++        finally {
++            ev.flush();
++        }
+         function execTask() {
+             return exec(node, false).catch(err => onUnexpectedError(err, identifier));
+         }
+     };
+     const makeOfflineNodeProcessor = () => {
+@@ -863,18 +878,27 @@
+             isProcessing = true;
+             const promise = async () => {
+-                while (nodes.length && ws.isOpen) {
+-                    const { type, node } = nodes.shift();
+-                    const nodeProcessor = nodeProcessorMap.get(type);
+-                    if (!nodeProcessor) {
+-                        onUnexpectedError(new Error(`unknown offline node type: ${type}`), 'processing offline node');
+-                        continue;
++                try {
++                    while (nodes.length && ws.isOpen) {
++                        const { type, node } = nodes.shift();
++                        const nodeProcessor = nodeProcessorMap.get(type);
++                        if (!nodeProcessor) {
++                            onUnexpectedError(new Error(`unknown offline node type: ${type}`), 'processing offline node');
++                            continue;
++                        }
++                        try {
++                            await nodeProcessor(node);
++                        }
++                        catch (error) {
++                            onUnexpectedError(error, 'processing offline node');
++                        }
+                     }
+-                    await nodeProcessor(node);
+                 }
+-                isProcessing = false;
++                finally {
++                    isProcessing = false;
++                }
+             };
+             promise().catch(error => onUnexpectedError(error, 'processing offline nodes'));
+         };
+         return { enqueue };
+     };
+     const offlineNodeProcessor = makeOfflineNodeProcessor();
+@@ -884,7 +908,7 @@
+     const processNode = (type, node, identifier, exec) => {
+         const isOffline = !!node.attrs.offline;
+-        if (isOffline) {
++        if (isOffline && !(config.prioritizeLiveMessages && type === 'receipt')) {
+             offlineNodeProcessor.enqueue(type, node);
+         }
+         else {
+             processNodeWithBuffer(node, identifier, exec);

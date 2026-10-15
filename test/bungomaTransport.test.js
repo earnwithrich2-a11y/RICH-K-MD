@@ -74,3 +74,71 @@ test("missing retry payloads cannot reset recipient sessions or publish any repl
     });
     await resend({ remoteJid: "15550000002@s.whatsapp.net" }, ["synthetic"], {}, {});
 });
+
+function offlineProcessor(context) {
+    const start = source.indexOf("const processNodeWithBuffer =");
+    const end = source.indexOf("// Handles newsletter notifications", start);
+    return vm.runInNewContext(`${source.slice(start, end)}; processNode`, {
+        config: { prioritizeLiveMessages: true },
+        ws: { isOpen: true },
+        ev: { buffer() {}, flush() {} },
+        handleMessage: async () => {},
+        handleReceipt: async () => {},
+        handleNotification: async () => {},
+        handleCall: async () => {},
+        onUnexpectedError() {},
+        ...context,
+    });
+}
+
+const settle = () => new Promise(resolve => setImmediate(resolve));
+
+test("offline retry receipts cannot block a fresh offline command", async () => {
+    let release, started, received = 0, flushes = 0;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const entered = new Promise(resolve => { started = resolve; });
+    const receipt = async () => { started(); await waiting; };
+    const message = async () => { received++; };
+    const process = offlineProcessor({
+        handleReceipt: receipt, handleMessage: message,
+        ev: { buffer() {}, flush() { flushes++; } },
+    });
+    process("receipt", { attrs: { offline: "1" } }, "receipt", receipt);
+    await entered;
+    process("message", { attrs: { offline: "1" } }, "message", message);
+    await settle();
+    assert.equal(received, 1, "incoming command must not wait for retry completion");
+    release();
+    await settle();
+    assert.equal(flushes, 1);
+});
+
+test("failed offline packets do not wedge later messages or release message ordering", async () => {
+    const seen = [], errors = [];
+    const message = async node => {
+        seen.push(node.attrs.id);
+        if (node.attrs.id === "bad") throw new Error("Synthetic failure");
+    };
+    const process = offlineProcessor({
+        handleMessage: message, onUnexpectedError: error => errors.push(error),
+    });
+    process("message", { attrs: { offline: "1", id: "bad" } }, "", message);
+    process("message", { attrs: { offline: "1", id: "next" } }, "", message);
+    await settle();
+    process("message", { attrs: { offline: "1", id: "later" } }, "", message);
+    await settle();
+    assert.deepEqual(seen, ["bad", "next", "later"]);
+    assert.equal(errors.length, 1);
+});
+
+test("node buffer ownership is released even if the error reporter throws", async () => {
+    let buffers = 0;
+    const start = source.indexOf("const processNodeWithBuffer =");
+    const end = source.indexOf("const makeOfflineNodeProcessor =", start);
+    const run = vm.runInNewContext(`${source.slice(start, end)}; processNodeWithBuffer`, {
+        ev: { buffer() { buffers++; }, flush() { buffers--; } },
+        onUnexpectedError() { throw new Error("Reporter failed"); },
+    });
+    await assert.rejects(run({}, "", async () => { throw new Error("Packet failed"); }), /Reporter failed/);
+    assert.equal(buffers, 0);
+});
