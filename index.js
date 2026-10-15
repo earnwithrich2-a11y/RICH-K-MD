@@ -3,6 +3,7 @@ require("./RICHK-MD-core/gmdHelpers");
 
 const smokeTestMode = process.env.BOT_SMOKE_TEST === "1";
 const { canShowCurrentChannelJid } = require("./RICHK-MD-core/connection/channelJid");
+const { attachCommandDiagnostics } = require("./RICHK-MD-core/connection/commandDiagnostics");
 
 const {
     default: giftedConnect,
@@ -148,6 +149,7 @@ app.get("/health", (req, res) =>
                 ? Gifted.ev.isBufferingLiveMessages()
                 : Gifted?.ev?.isBuffering?.()) === true,
             bufferingBackgroundEvents: Gifted?.ev?.isBuffering?.() === true,
+            diagnostics: Gifted?.commandDiagnostics?.snapshot(),
         },
     }),
 );
@@ -265,6 +267,7 @@ async function startGifted() {
         };
 
         Gifted = giftedConnect(socketConfig);
+        attachCommandDiagnostics(Gifted);
         persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
         trackSelfChatDelivery(Gifted);
         store.bind(Gifted.ev);
@@ -739,6 +742,7 @@ const BOT_START_TIME = Date.now();
 
 function setupCommandHandler(Gifted) {
     const handleMessage = async (ms, type) => {
+        Gifted.commandDiagnostics?.mark("handlerEntries");
         if (!ms?.key) return;
         if (!ms.message) {
             if (ms.messageStubType !== undefined) {
@@ -748,23 +752,34 @@ function setupCommandHandler(Gifted) {
             }
             return;
         }
-        if (type === "append" && !ms.key.fromMe) return;
+        if (type === "append" && !ms.key.fromMe) {
+            Gifted.commandDiagnostics?.mark("historicalSkipped");
+            return;
+        }
 
         const messageId = ms.key.id;
-        if (processedMessages.has(messageId)) return;
+        if (processedMessages.has(messageId)) {
+            Gifted.commandDiagnostics?.mark("duplicatesSkipped");
+            return;
+        }
         processedMessages.add(messageId);
 
         setTimeout(() => processedMessages.delete(messageId), 60000);
 
         const messageTimestamp =
             (ms.messageTimestamp?.low || ms.messageTimestamp) * 1000;
-        if (messageTimestamp && messageTimestamp < BOT_START_TIME - 5000)
+        if (messageTimestamp && messageTimestamp < BOT_START_TIME - 5000) {
+            Gifted.commandDiagnostics?.mark("oldTimestampSkipped");
             return;
+        }
 
+        Gifted.commandDiagnostics?.mark("settingsStarted");
         const settings = await getAllSettings();
+        Gifted.commandDiagnostics?.mark("settingsLoaded");
         const botId = standardizeJid(Gifted.user?.id);
 
         const serialized = await serializeMessage(ms, Gifted, settings);
+        Gifted.commandDiagnostics?.mark("serialized");
         if (!serialized) return;
 
         const {
@@ -789,6 +804,7 @@ function setupCommandHandler(Gifted) {
 
         const gmd = isCommand && command ? findCommand(command) : null;
         if (isCommand) {
+            Gifted.commandDiagnostics?.mark("commandsRecognized");
             console.info(
                 `[WhatsApp] Command text decrypted; registered handler ${gmd ? "found" : "not found"}.`,
             );
@@ -967,6 +983,7 @@ function setupCommandHandler(Gifted) {
                 });
 
                 await gmd.function(from, Gifted, conText);
+                Gifted.commandDiagnostics?.mark("commandsCompleted");
                 console.info("[WhatsApp] Command handler completed.");
             } catch (error) {
                 console.error(`Command error [${command}]:`, error);

@@ -363,11 +363,16 @@ diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/
          return { enqueue };
      };
      const offlineNodeProcessor = makeOfflineNodeProcessor();
-@@ -884,7 +908,7 @@
+@@ -883,8 +907,12 @@
+     const offlineNodeProcessor = makeOfflineNodeProcessor();
++    const receiveStartedAt = Date.now();
      const processNode = (type, node, identifier, exec) => {
          const isOffline = !!node.attrs.offline;
 -        if (isOffline) {
-+        if (isOffline && !(config.prioritizeLiveMessages && type === 'receipt')) {
++        const timestamp = Number(node.attrs.t) * 1000;
++        const freshMessage = type === 'message' && Number.isFinite(timestamp) &&
++            timestamp >= receiveStartedAt - 5000 && timestamp <= Date.now() + 5000;
++        if (isOffline && !(config.prioritizeLiveMessages && (type === 'receipt' || freshMessage))) {
              offlineNodeProcessor.enqueue(type, node);
          }
          else {
