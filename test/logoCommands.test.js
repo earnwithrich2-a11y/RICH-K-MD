@@ -56,13 +56,13 @@ test(".logo and logo-maker aliases generate an actual PNG in the current chat wi
     assert.deepEqual(requests, []);
 });
 
-test(".logo validates empty and overlong text and shows the configured prefix", async () => {
-    for (const text of ["", "x".repeat(81)]) {
+test(".logo shows types without text, and validates overlong text", async () => {
+    for (const text of ["", " ", "x".repeat(81)]) {
         const c = context(text);
         await find("logo").handler("chat", c.socket, c.input);
         assert.equal(c.sent.length, 0);
         assert.equal(c.replies.length, 1);
-        assert.match(c.replies[0], text ? /80 characters/ : /!logo <text>/);
+        assert.match(c.replies[0], text.trim() ? /80 characters/ : /LOGO TYPES/);
     }
 });
 
@@ -115,9 +115,58 @@ test("logo menus stay separate from generation and use the configured prefix", a
     await find("logolist").handler("chat", c.socket, c.input);
     assert.notEqual(find("logo"), find("logolist"));
     for (const alias of ["logos", "logohelp", "logomenu"]) assert.equal(find(alias), find("logolist"));
-    assert.match(c.replies[0], /!logo RICHK-MD/);
-    assert.match(c.replies[0], /Specialty effects require the external logo service/);
+    assert.match(c.replies[0], /!logo 1 RICH K MD/);
+    assert.match(c.replies[0], /Specialty types depend on the image service/);
     assert.equal(c.sent.length, 0);
     const names = registered.flatMap(({ metadata }) => [metadata.pattern, ...metadata.aliases]);
     assert.equal(names.length, new Set(names).size, "no alias may shadow another logo command");
+});
+
+test("a numbered menu choice generates the selected local logo with the supplied text", async () => {
+    requests = [];
+    const c = context("1 MY BRAND");
+    await find("logo").handler("current-chat", c.socket, c.input);
+    assert.equal(c.sent.length, 1);
+    assert.match(c.sent[0][1].caption, /Text:\* MY BRAND/);
+    assert.doesNotMatch(c.sent[0][1].caption, /Text:\* 1 MY BRAND/);
+    assert.equal((await sharp(c.sent[0][1].image).metadata()).format, "png");
+    assert.equal(requests.length, 0);
+});
+
+test("selecting a type alone asks for text without starting generation", async () => {
+    for (const selection of ["1", "2", "glossysilver", "!silverlogo"]) {
+        requests = [];
+        const c = context(selection);
+        await find("logo").handler("chat", c.socket, c.input);
+        assert.equal(c.sent.length, 0);
+        assert.equal(requests.length, 0);
+        assert.match(c.replies[0], /Now add your logo text/);
+        assert.match(c.replies[0], /!logo [12] <text>/);
+    }
+});
+
+test("invalid logo numbers explain how to find valid types", async () => {
+    for (const selection of ["0 Brand", "999 Brand"]) {
+        const c = context(selection);
+        await find("logo").handler("chat", c.socket, c.input);
+        assert.equal(c.sent.length, 0);
+        assert.match(c.replies[0], /Choose a logo type from 1 to/);
+        assert.match(c.replies[0], /!logo to see the types/);
+    }
+});
+
+test("numbered choices, style names and prefixed aliases dispatch the selected specialty generator", async () => {
+    const png = await generateTextLogo("Provider");
+    for (const selection of ["2 MY BRAND", "glossysilver MY BRAND", "!silverlogo MY BRAND"]) {
+        requests = [];
+        requestHandler = async (_url, opts) => opts.responseType === "arraybuffer"
+            ? { data: png }
+            : { data: { success: true, result: { image_url: "https://images.example/logo.png" } } };
+        const c = context(selection, { GiftedTechApi: "https://api.example" });
+        await find("logo").handler("chat", c.socket, c.input);
+        assert.equal(c.sent.length, 1);
+        assert.equal(requests[0][0], "https://api.example/api/ephoto360/glossysilver");
+        assert.equal(requests[0][1].params.text, "MY BRAND");
+        assert.match(c.sent[0][1].caption, /Glossy Silver/);
+    }
 });
