@@ -6,3 +6,4 @@
 - [Outgoing command routing](outgoing-command-routing.md) — commands sent by the linked bot account to other people's chats should reply there, not in self-chat.
 - [Signal transaction safety](signal-transaction-safety.md) — isolate async crypto operations and commit keys atomically; never trade encryption-state safety for queue speed.
 - [Group URL lock policy](group-url-lock-policy.md) — only group admins and the group owner are exempt; global bot-owner or sudo status is not enough.
+- [Logo generation availability](logo-generation.md) — basic text logos must work independently of specialty providers; never silently substitute a different named effect.
