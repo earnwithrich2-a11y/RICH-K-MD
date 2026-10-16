@@ -117,6 +117,7 @@ gmd(
 ▸ *${p}antiedit on/off* — ${formatSettingsStatus(settings.ANTI_EDIT)} · Show edited messages
 ▸ *${p}anticall on/off/block/decline* — ${formatSettingsStatus(settings.ANTICALL)}
 ▸ *${p}antilink on/warn/kick/off* — ${groupStatus("ANTILINK")}
+▸ *${p}lockurl on/off* — ${groupStatus("LOCKURL")} · Only group admins/owner may post links
 ▸ *${p}antibad on/warn/kick/off* — ${groupStatus("ANTIBAD")}
 
 *👥 GROUP*

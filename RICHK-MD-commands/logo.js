@@ -1,5 +1,6 @@
-const { gmd, gmdBuffer } = require("../RICHK-MD-core");
+const { gmd } = require("../RICHK-MD-core");
 const axios = require("axios");
+const { generateTextLogo, normalizeLogoText } = require("../RICHK-MD-core/textLogo");
 
 const logoEndpoints = [
   {
@@ -87,10 +88,10 @@ const logoEndpoints = [
     endpoint: "underwater",
   },
   {
-    pattern: "logomaker",
-    aliases: ["makelogo", "logomake"],
-    description: "Logo Maker",
-    endpoint: "logomaker",
+    pattern: "logo",
+    aliases: ["logomaker", "makelogo", "logomake"],
+    description: "Gold and Black Text Logo",
+    local: true,
   },
   {
     pattern: "cartoonstyle",
@@ -172,18 +173,25 @@ const logoEndpoints = [
   },
 ];
 
-async function createLogoCommand(config) {
-  gmd(
-    {
-      pattern: config.pattern,
-      aliases: config.aliases,
-      category: "logo",
-      react: "🎨",
-      description: `Create ${config.description}`,
-    },
-    async (from, Gifted, conText) => {
+const logoChoices = [
+  ...logoEndpoints.filter(style => style.local),
+  ...logoEndpoints.filter(style => !style.local),
+];
+const logoHandlers = new Map();
+
+async function showLogoMenu({ reply, botCaption = "RICHK-MD", botName = "RICHK-MD", botPrefix = "." }) {
+  const choices = logoChoices.map((style, index) =>
+    `${index + 1}. *${style.description}*\n   ${botPrefix}${style.local ? "logomaker" : style.pattern} <text>${style.local ? " — generated locally" : " — external service"}`,
+  ).join("\n");
+  return reply(
+    `🎨 *${botName} LOGO TYPES*\n\n${choices}\n\nChoose a type, then add your logo text:\n${botPrefix}logo 1 RICH K MD\n\nYou can also use its command directly:\n${botPrefix}glossysilver RICH K MD\n\nTo see a type's usage, send ${botPrefix}logo <number>.\nUse the prefix; you do not need to reply to this menu.\n\nType 1 works without an external service. Specialty types depend on the image service, which may be unavailable.\n\n> ${botCaption}`,
+  );
+}
+
+function createLogoCommand(config) {
+    const handler = async (from, Gifted, conText) => {
       const {
-        q,
+        q: rawText,
         mek,
         reply,
         react,
@@ -191,31 +199,71 @@ async function createLogoCommand(config) {
         GiftedApiKey,
         pushname,
         botCaption,
+        botPrefix = ".",
       } = conText;
+      const setReaction = async emoji => {
+        try { await react?.(emoji); } catch { /* Reactions must not prevent image delivery. */ }
+      };
+      let q = String(rawText || "").trim();
+      if (config.local) {
+        if (!q) return showLogoMenu(conText);
+        const [choice, ...rest] = q.split(/\s+/);
+        const name = choice.startsWith(botPrefix) ? choice.slice(botPrefix.length) : choice;
+        const selected = /^\d+$/.test(name)
+          ? logoChoices[Number(name) - 1]
+          : logoChoices.find(style => style.pattern === name.toLowerCase() || style.aliases.includes(name.toLowerCase()));
+        if (/^\d+$/.test(name) && !selected) {
+          return reply(`Choose a logo type from 1 to ${logoChoices.length}. Use ${botPrefix}logo to see the types.`);
+        }
+        if (selected) {
+          q = rest.join(" ");
+          if (!q) {
+            const number = logoChoices.indexOf(selected) + 1;
+            return reply(`*${selected.description}*\n\nNow add your logo text:\n${botPrefix}logo ${number} <text>\nExample: ${botPrefix}logo ${number} RICH K MD`);
+          }
+          if (!selected.local) {
+            return logoHandlers.get(selected.pattern)(from, Gifted, { ...conText, q });
+          }
+        }
+      }
 
       if (!q) {
-        await react("❌");
+        await setReaction("❌");
         return reply(
-          `Please provide text for the logo.\n\nUsage: .${config.pattern} <text>\nExample: .${config.pattern} ${pushname || "RICHK-MD"}`,
+          `Please provide text for the logo.\n\nUsage: ${botPrefix}${config.pattern} <text>\nExample: ${botPrefix}${config.pattern} ${pushname || "RICHK-MD"}\n\nUse ${botPrefix}logolist to see all logo styles.`,
         );
       }
 
+      let text;
       try {
-        await react("⏳");
+        text = normalizeLogoText(q);
+      } catch (error) {
+        return reply(error.message);
+      }
+      try {
+        await setReaction("⏳");
 
-        const apiUrl = `${GiftedTechApi}/api/ephoto360/${config.endpoint}?apikey=${GiftedApiKey}&text=${encodeURIComponent(q)}`;
-        const res = await axios.get(apiUrl, { timeout: 60000 });
+        let imageBuffer;
+        if (config.local) {
+          imageBuffer = await generateTextLogo(text);
+        } else {
+          const apiUrl = `${GiftedTechApi}/api/ephoto360/${config.endpoint}`;
+          const res = await axios.get(apiUrl, {
+            params: { apikey: GiftedApiKey, text },
+            timeout: 20000,
+          });
 
-        if (!res.data || !res.data.success || !res.data.result?.image_url) {
-          await react("❌");
-          return reply("Failed to generate logo. Please try again.");
+          if (!res.data?.success || !res.data.result?.image_url) {
+            throw new Error("Logo service did not return an image");
+          }
+          const image = await axios.get(res.data.result.image_url, {
+            responseType: "arraybuffer", timeout: 20000, maxContentLength: 10 * 1024 * 1024,
+          });
+          imageBuffer = Buffer.from(image.data);
         }
 
-        const imageUrl = res.data.result.image_url;
-        const imageBuffer = await gmdBuffer(imageUrl);
-
-        if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
-          await react("❌");
+        if (!imageBuffer?.length || !Buffer.isBuffer(imageBuffer)) {
+          await setReaction("❌");
           return reply("Failed to download the generated logo.");
         }
 
@@ -223,19 +271,28 @@ async function createLogoCommand(config) {
           from,
           {
             image: imageBuffer,
-            caption: `✨ *${config.description}*\n\n📝 *Text:* ${q}\n\n> ${botCaption}`,
+            caption: `✨ *${config.description}*\n\n📝 *Text:* ${text}\n\n> ${botCaption || "RICHK-MD"}`,
           },
           { quoted: mek },
         );
 
-        await react("✅");
+        await setReaction("✅");
       } catch (e) {
-        console.error(`Error in ${config.pattern} command:`, e.message);
-        await react("❌");
-        await reply("Failed to generate logo. Please try again later.");
+        console.error(`Logo command failed: ${config.pattern}`);
+        await setReaction("❌");
+        await reply(config.local
+          ? "Could not create or send the logo. Please try again."
+          : `The specialty logo service is unavailable. Try ${botPrefix}logo ${text} for a gold-and-black text logo generated by the bot.`);
       }
-    },
-  );
+    };
+    logoHandlers.set(config.pattern, handler);
+    gmd({
+      pattern: config.pattern,
+      aliases: config.aliases,
+      category: "logo",
+      react: "🎨",
+      description: `Create ${config.description}`,
+    }, handler);
 }
 
 logoEndpoints.forEach((config) => createLogoCommand(config));
@@ -243,21 +300,12 @@ logoEndpoints.forEach((config) => createLogoCommand(config));
 gmd(
   {
     pattern: "logolist",
-    aliases: ["logos", "logo", "logohelp", "logomenu"],
+    aliases: ["logos", "logohelp", "logomenu"],
     category: "logo",
     react: "📜",
     description: "Show all available logo commands",
   },
   async (from, Gifted, conText) => {
-    const { mek, reply, react, botCaption, botName, botPrefix } = conText;
-
-    const logoList = logoEndpoints
-      .map((l, i) => `${i + 1}. *.${l.pattern}* - ${l.description}`)
-      .join("\n");
-
-    await reply(
-      `🎨 *${botName} LOGO MAKER*\n\n${logoList}\n\n📝 *Usage:* ${botPrefix}commandname <your text>\n📌 *Example:* ${botPrefix}glossysilver RICHK-MD\n\n> ${botCaption}`,
-    );
-    await react("✅");
+    await showLogoMenu(conText);
   },
 );

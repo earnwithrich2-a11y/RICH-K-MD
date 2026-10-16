@@ -3,6 +3,7 @@ require("./RICHK-MD-core/gmdHelpers");
 
 const smokeTestMode = process.env.BOT_SMOKE_TEST === "1";
 const { canShowCurrentChannelJid } = require("./RICHK-MD-core/connection/channelJid");
+const { attachCommandDiagnostics } = require("./RICHK-MD-core/connection/commandDiagnostics");
 
 const {
     default: giftedConnect,
@@ -144,7 +145,11 @@ app.get("/health", (req, res) =>
         uptime: process.uptime(),
         whatsapp: {
             connected: Gifted?.ws?.isOpen === true,
-            bufferingMessages: Gifted?.ev?.isBuffering?.() === true,
+            bufferingMessages: (Gifted?.ev?.isBufferingLiveMessages
+                ? Gifted.ev.isBufferingLiveMessages()
+                : Gifted?.ev?.isBuffering?.()) === true,
+            bufferingBackgroundEvents: Gifted?.ev?.isBuffering?.() === true,
+            diagnostics: Gifted?.commandDiagnostics?.snapshot(),
         },
     }),
 );
@@ -189,6 +194,11 @@ async function startGifted() {
         const { version } = await fetchLatestWaWebVersion();
         const sessionDbPath = path.join(sessionDir, "session.db");
         const { state, saveCreds } = await useSQLiteAuthState(sessionDbPath);
+        const { repairLegacyDeviceSignature } = require("./RICHK-MD-core/connection/deviceIdentitySignature");
+        if (repairLegacyDeviceSignature(state.creds).repaired) {
+            await saveCreds();
+            console.info("[WhatsApp] Legacy device certificate signing prefix corrected; login keys retained.");
+        }
 
         if (store) store.destroy();
         store = new SQLiteStore();
@@ -245,11 +255,19 @@ async function startGifted() {
                 console.info(
                     `[WhatsApp] Self-chat resend lookup: ${result.source}; chat=${domain(chat)}; requester=${domain(requester)}/${requester?.device ? "companion" : "primary"}.`,
                 );
+            } else if (key.fromMe) {
+                const chat = jidDecode(key.remoteJid);
+                if (chat?.server === "lid" || chat?.server === "s.whatsapp.net") {
+                    console.info(
+                        `[WhatsApp] DM resend lookup: ${result.source}; chat=${chat.server === "lid" ? "lid" : "phone"}.`,
+                    );
+                }
             }
             return result.message;
         };
 
         Gifted = giftedConnect(socketConfig);
+        attachCommandDiagnostics(Gifted);
         persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
         trackSelfChatDelivery(Gifted);
         store.bind(Gifted.ev);
@@ -590,6 +608,15 @@ function setupPresence(Gifted) {
 }
 
 function setupChatBotAndAntiLink(Gifted) {
+    const { isMessageEdit } = require("./RICHK-MD-core/groupLinkLock");
+    Gifted.ev.on("messages.update", async (updates) => {
+        for (const update of updates || []) {
+            const edited = update?.update?.message;
+            if (!isMessageEdit(edited)) continue;
+            if (!update.key?.remoteJid?.endsWith("@g.us")) continue;
+            await GiftedAntiLink(Gifted, { key: update.key, message: edited }, getGroupMetadata, true);
+        }
+    });
     Gifted.ev.on("messages.upsert", async ({ messages, type }) => {
         if (type === "append") return;
 
@@ -610,6 +637,8 @@ function setupChatBotAndAntiLink(Gifted) {
 
         for (const message of messages) {
             if (!message?.message) continue;
+            // Edits are enforced once, using messages.update's original message ID.
+            if (isMessageEdit(message.message)) continue;
             const from = message.key?.remoteJid || "";
             if (message.key.fromMe && !from.endsWith("@g.us")) continue;
 
@@ -713,6 +742,7 @@ const BOT_START_TIME = Date.now();
 
 function setupCommandHandler(Gifted) {
     const handleMessage = async (ms, type) => {
+        Gifted.commandDiagnostics?.mark("handlerEntries");
         if (!ms?.key) return;
         if (!ms.message) {
             if (ms.messageStubType !== undefined) {
@@ -722,23 +752,34 @@ function setupCommandHandler(Gifted) {
             }
             return;
         }
-        if (type === "append" && !ms.key.fromMe) return;
+        if (type === "append" && !ms.key.fromMe) {
+            Gifted.commandDiagnostics?.mark("historicalSkipped");
+            return;
+        }
 
         const messageId = ms.key.id;
-        if (processedMessages.has(messageId)) return;
+        if (processedMessages.has(messageId)) {
+            Gifted.commandDiagnostics?.mark("duplicatesSkipped");
+            return;
+        }
         processedMessages.add(messageId);
 
         setTimeout(() => processedMessages.delete(messageId), 60000);
 
         const messageTimestamp =
             (ms.messageTimestamp?.low || ms.messageTimestamp) * 1000;
-        if (messageTimestamp && messageTimestamp < BOT_START_TIME - 5000)
+        if (messageTimestamp && messageTimestamp < BOT_START_TIME - 5000) {
+            Gifted.commandDiagnostics?.mark("oldTimestampSkipped");
             return;
+        }
 
+        Gifted.commandDiagnostics?.mark("settingsStarted");
         const settings = await getAllSettings();
+        Gifted.commandDiagnostics?.mark("settingsLoaded");
         const botId = standardizeJid(Gifted.user?.id);
 
         const serialized = await serializeMessage(ms, Gifted, settings);
+        Gifted.commandDiagnostics?.mark("serialized");
         if (!serialized) return;
 
         const {
@@ -763,6 +804,7 @@ function setupCommandHandler(Gifted) {
 
         const gmd = isCommand && command ? findCommand(command) : null;
         if (isCommand) {
+            Gifted.commandDiagnostics?.mark("commandsRecognized");
             console.info(
                 `[WhatsApp] Command text decrypted; registered handler ${gmd ? "found" : "not found"}.`,
             );
@@ -941,6 +983,8 @@ function setupCommandHandler(Gifted) {
                 });
 
                 await gmd.function(from, Gifted, conText);
+                Gifted.commandDiagnostics?.mark("commandsCompleted");
+                console.info("[WhatsApp] Command handler completed.");
             } catch (error) {
                 console.error(`Command error [${command}]:`, error);
                 try {
@@ -974,6 +1018,8 @@ function setupCommandHandler(Gifted) {
 
 function setupGiftedHelpers(Gifted, from) {
     Gifted.getJidFromLid = async (lid) => {
+        const native = await Gifted.signalRepository?.lidMapping?.getPNForLID(lid);
+        if (native) return native;
         const groupMetadata = await getGroupMetadata(Gifted, from);
         if (!groupMetadata) return null;
         const match = groupMetadata.participants.find(
@@ -983,6 +1029,8 @@ function setupGiftedHelpers(Gifted, from) {
     };
 
     Gifted.getLidFromJid = async (jid) => {
+        const native = await Gifted.signalRepository?.lidMapping?.getLIDForPN(jid);
+        if (native) return native;
         const groupMetadata = await getGroupMetadata(Gifted, from);
         if (!groupMetadata) return null;
         const match = groupMetadata.participants.find(
