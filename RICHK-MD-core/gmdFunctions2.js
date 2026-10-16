@@ -3,6 +3,7 @@ const path = require("path");
 const { pipeline } = require("stream/promises");
 const { createContext } = require("./gmdHelpers");
 const { getSetting, getAllSettings } = require("./database/settings");
+const { enforceGroupLinkLock } = require("./groupLinkLock");
 const logger = require("gifted-baileys/lib/Utils/logger").default.child({});
 const { isJidGroup, downloadMediaMessage } = require("gifted-baileys");
 
@@ -61,9 +62,9 @@ async function GiftedAutoReact(emoji, ms,Gifted) {
 
 const DEV_NUMBERS = ['254715206562', '254747746851', '254114018035', '254728782591', '254799916673', '254762016957', '254113174209'];
 
-const GiftedAntiLink = async (Gifted, message, getGroupMetadata) => {
+const GiftedAntiLink = async (Gifted, message, getGroupMetadata, lockOnly = false) => {
     try {
-        if (!message?.message || message.key.fromMe) return;
+        if (!message?.message || !message.key) return;
         const from = message.key.remoteJid; 
         const isGroup = from.endsWith('@g.us');
 
@@ -72,6 +73,11 @@ const GiftedAntiLink = async (Gifted, message, getGroupMetadata) => {
         const { getGroupSetting, addAntilinkWarning, resetAntilinkWarnings } = require('./database/groupSettings');
         const { getSudoNumbers } = require('./database/sudo');
         const { getLidMapping } = require('./connection/groupCache');
+        if (await getGroupSetting(from, 'LOCKURL') === 'true') {
+            await enforceGroupLinkLock(Gifted, message, getGroupMetadata);
+            return;
+        }
+        if (lockOnly || message.key.fromMe) return;
         const antiLink = await getGroupSetting(from, 'ANTILINK');
         
         if (!antiLink || antiLink === 'false' || antiLink === 'off') return;
