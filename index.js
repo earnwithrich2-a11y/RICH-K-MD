@@ -87,7 +87,8 @@ const {
 const { findMessageForRetryWithWait } = require('./RICHK-MD-core/connection/messageRetry');
 const { persistOwnOutgoingMessages } = require('./RICHK-MD-core/connection/outgoingMessageStore');
 const { trackSelfChatDelivery } = require('./RICHK-MD-core/connection/selfChatDelivery');
-const { installBranding } = require("./RICHK-MD-core/branding");
+const { installBranding, runCommandOutput } = require("./RICHK-MD-core/branding");
+const { MenuPromo } = require("./RICHK-MD-core/connection/menuPromo");
 const { RecoveryArchive } = require("./RICHK-MD-core/connection/recoveryArchive");
 const { installMessageRecovery } = require("./RICHK-MD-core/connection/messageRecovery");
 const config = require("./config");
@@ -179,6 +180,7 @@ setInterval(async () => {
 
 const sessionDir = path.join(__dirname, "RICHK-MD-core", "session");
 let recoveryArchive;
+let menuPromo;
 const pluginsPath = path.join(__dirname, "RICHK-MD-commands");
 if (smokeTestMode) {
     loadPlugins(pluginsPath, {
@@ -279,6 +281,7 @@ async function startGifted() {
         attachCommandDiagnostics(Gifted);
         persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
         installBranding(Gifted);
+        menuPromo ||= new MenuPromo(path.join(sessionDir, "menu-promos.db"));
         trackSelfChatDelivery(Gifted);
         store.bind(Gifted.ev);
 
@@ -801,7 +804,8 @@ function setupCommandHandler(Gifted) {
                     body,
                     command,
                 });
-                await bodyCmd.function(from, Gifted, conText);
+                await runCommandOutput(command || bodyCmd.pattern, settings,
+                    () => bodyCmd.function(from, Gifted, conText));
             } catch (error) {
                 console.error(`Body command error:`, error);
             }
@@ -849,13 +853,15 @@ function setupCommandHandler(Gifted) {
                     command,
                 });
 
-                await gmd.function(from, Gifted, conText);
+                await runCommandOutput(command, settings, () => gmd.function(from, Gifted, conText));
+                void menuPromo.maybeSend(Gifted, command, ms).catch(() =>
+                    console.warn("[Menu promo] Could not process cooldown."));
                 Gifted.commandDiagnostics?.mark("commandsCompleted");
                 console.info("[WhatsApp] Command handler completed.");
             } catch (error) {
                 console.error(`Command error [${command}]:`, error);
                 try {
-                    await Gifted.sendMessage(
+                    await runCommandOutput(command, settings, async () => Gifted.sendMessage(
                         from,
                         {
                             text: `🚨 Command failed: ${error.message}`,
@@ -865,7 +871,7 @@ function setupCommandHandler(Gifted) {
                             })),
                         },
                         { quoted: ms },
-                    );
+                    ));
                 } catch (sendErr) {
                     console.error("Error sending error message:", sendErr);
                 }
@@ -1011,8 +1017,8 @@ function buildContext(ms, settings, helpers, data) {
         isSuperUser: data.isSuperUser,
         botMode: settings.MODE,
         botPic: settings.BOT_PIC,
-        botFooter: settings.FOOTER,
-        botCaption: settings.CAPTION,
+        botFooter: ["menu", "settings"].includes(data.command) ? settings.FOOTER : "",
+        botCaption: ["menu", "settings"].includes(data.command) ? settings.CAPTION : "",
         botVersion: settings.VERSION,
         ownerNumber: settings.OWNER_NUMBER,
         ownerName: settings.OWNER_NAME,
