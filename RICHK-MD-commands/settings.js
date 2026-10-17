@@ -827,52 +827,10 @@ gmd(
     aliases: ["antilink"],
     react: "⚙️",
     category: "group",
-    description: "Set antilink for this group (on/warn/delete/kick/off)",
+    description: "Toggle group link deletion and private warnings (on/off; legacy warn/kick)",
   },
   async (from, Gifted, conText) => {
-    const { q, reply, react, isSuperUser, isGroup, isAdmin } = conText;
-    if (!isGroup) return reply("❌ This command only works in groups!");
-    if (!isSuperUser && !isAdmin) return reply("❌ Admin/Owner Only Command!");
-
-    const input = (q || "").toLowerCase().trim();
-    const modeMap = {
-      on: "delete",
-      off: "false",
-      true: "delete",
-      false: "false",
-      delete: "delete",
-      kick: "kick",
-      warn: "warn",
-    };
-
-    const value = modeMap[input];
-    if (!value) {
-      const warnCount = await getGroupSetting(from, "ANTILINK_WARN_COUNT");
-      return reply(`❌ Please specify a mode:
-• *on/delete* - Delete links (no kick)
-• *warn* - Warn user, kick after ${warnCount} warnings
-• *kick* - Delete link & immediately kick user
-• *off* - Disable antilink`);
-    }
-
-    try {
-      const current = await getGroupSetting(from, "ANTILINK");
-      if (current === value) {
-        const displayVal = value === "false" ? "OFF" : value.toUpperCase();
-        return reply(`⚠️ Antilink is already: *${displayVal}*`);
-      }
-      await setGroupSetting(from, "ANTILINK", value);
-      await react("✅");
-      const displayVal = value === "false" ? "OFF" : value.toUpperCase();
-      let msg = `✅ Antilink: *${displayVal}*`;
-      if (value === "warn") {
-        const warnCount = await getGroupSetting(from, "ANTILINK_WARN_COUNT");
-        msg += `\nKick after *${warnCount}* warnings`;
-      }
-      await reply(msg);
-    } catch (error) {
-      await reply(`❌ Error: ${error.message}`);
-    }
+    return require("../RICHK-MD-core/smartAntiLink").configureAntiLink(from, Gifted, conText);
   },
 );
 

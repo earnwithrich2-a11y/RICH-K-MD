@@ -1,7 +1,9 @@
 const FOOTER = "⚡ Powered by https://boosting.richkaurex.site 📢 WhatsApp Channel: https://whatsapp.com/channel/0029VbE9wUJ0Vyc8uRaMNM21";
 
 function appendFooter(text = "") {
-    return text.includes(FOOTER) ? text : `${text}\n\n${FOOTER}`;
+    const alreadyPromoted = text.includes("https://boosting.richkaurex.site") &&
+        text.includes("https://whatsapp.com/channel/0029VbE9wUJ0Vyc8uRaMNM21");
+    return text.includes(FOOTER) || alreadyPromoted ? text : `${text}\n\n${FOOTER}`;
 }
 
 // Return a copy: don't modify quoted originals or cached retry payloads.
