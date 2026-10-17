@@ -8,7 +8,7 @@
     <!-- Metadata for SEO -->
     <meta name="description" content="RICHK-MD | WABOT">
     <meta property="og:title" content="RICHK-MD | WABOT">
-    <meta property="og:description" content="RICHK-MD is active and running">
+    <meta property="og:description" content="RICHK-MD connection status">
     <meta property="og:image" content="/rich-k-logo.png">
     <link rel="icon" type="image/png" href="/rich-k-logo.png">
 
@@ -49,7 +49,7 @@
 </head>
 <body>
     <img src="/rich-k-logo.png" alt="RICH K MD logo" width="180" style="height:auto;margin-bottom:24px">
-    <div class="glow">✅ DEPLOYMENT SUCCESSFUL,<br>RICHK-MD V5 CONNECTED!</div> </br>
+    <div class="glow" id="connection-status" role="status">RICHK-MD<br>Checking WhatsApp connection…</div> </br>
     <div class="current-info" id="Info">Loading...</div>
     <div class="developer">RICHK-MD</div>
 </body>
@@ -73,5 +73,24 @@
 
     // Initial call to set info immediately
     updateInfo();
+    async function updateConnection() {
+      const status = document.getElementById("connection-status");
+      try {
+        const response = await fetch("/health", { cache: "no-store" });
+        if (!response.ok) throw new Error("Health check failed");
+        const { whatsapp } = await response.json();
+        status.textContent = whatsapp?.authRequired
+          ? "RICHK-MD • WhatsApp logged out. A valid paired session is required."
+          : whatsapp?.connectionReplaced
+            ? "RICHK-MD • Connection replaced by another device."
+            : whatsapp?.connected
+              ? "RICHK-MD • WhatsApp connected"
+              : "RICHK-MD • WhatsApp disconnected or connecting";
+      } catch {
+        status.textContent = "RICHK-MD • Server unavailable";
+      }
+    }
+    updateConnection();
+    setInterval(updateConnection, 5000);
 </script>
 </html>

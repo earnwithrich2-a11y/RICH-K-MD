@@ -1,0 +1,420 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js b/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/validate-connection.js
+@@ -114,11 +114,13 @@
+     }
+     const account = WAProto_1.proto.ADVSignedDeviceIdentity.decode(details);
+     const { accountSignatureKey, accountSignature, details: deviceDetails } = account;
+-    const accountMsg = Buffer.concat([Buffer.from([6, 0]), deviceDetails, signedIdentityKey.public]);
++    const signingDetails = WAProto_1.proto.ADVDeviceIdentity.decode(deviceDetails);
++    const accountPrefix = signingDetails.deviceType === WAProto_1.proto.ADVEncryptionType.HOSTED ? Buffer.from([6, 5]) : Buffer.from([6, 0]);
++    const accountMsg = Buffer.concat([accountPrefix, deviceDetails, signedIdentityKey.public]);
+     if (!crypto_2.Curve.verify(accountSignatureKey, accountMsg, accountSignature)) {
+         throw new boom_1.Boom('Failed to verify account signature');
+     }
+-    const devicePrefix = isHostedAccount ? Buffer.from([6, 6]) : Buffer.from([6, 1]);
++    const devicePrefix = Buffer.from([6, 1]);
+     const deviceMsg = Buffer.concat([devicePrefix, deviceDetails, signedIdentityKey.public, accountSignatureKey]);
+     account.deviceSignature = crypto_2.Curve.sign(signedIdentityKey.private, deviceMsg);
+     const identity = (0, signal_1.createSignalIdentity)(jid, accountSignatureKey);
+diff --git a/node_modules/@whiskeysockets/baileys/lib/WABinary/jid-utils.js b/node_modules/@whiskeysockets/baileys/lib/WABinary/jid-utils.js
+--- a/node_modules/@whiskeysockets/baileys/lib/WABinary/jid-utils.js
++++ b/node_modules/@whiskeysockets/baileys/lib/WABinary/jid-utils.js
+@@ -23,7 +23,7 @@
+     return {
+         server: server,
+         user,
+-        domainType: server === 'lid' ? 1 : 0,
++        domainType: server === 'lid' ? 1 : server === 'hosted' ? 128 : server === 'hosted.lid' ? 129 : 0,
+         device: device ? +device : undefined
+     };
+ };
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Signal/libsignal.js b/node_modules/@whiskeysockets/baileys/lib/Signal/libsignal.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Signal/libsignal.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Signal/libsignal.js
+@@ -169,12 +169,15 @@
+         }
+     }
+     catch (err) {
+-        logger.warn?.({ err }, 'session migration to LID address failed, continuing without it');
++        throw err;
+     }
+ }
+ const jidToSignalProtocolAddress = (jid) => {
+-    const { user, device } = (0, WABinary_1.jidDecode)(jid);
+-    return new libsignal.ProtocolAddress(user, device || 0);
++    const { user, device, domainType, server } = (0, WABinary_1.jidDecode)(jid);
++    if (device === 99 && server !== 'hosted' && server !== 'hosted.lid') {
++        throw new Error('Device 99 requires a hosted address; non-hosted address rejected');
++    }
++    return new libsignal.ProtocolAddress(domainType ? `${user}_${domainType}` : user, device || 0);
+ };
+ const jidToSignalSenderKeyName = (group, user) => {
+     return new sender_key_name_1.SenderKeyName(group, jidToSignalProtocolAddress(user));
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js b/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js
+@@ -29,7 +29,8 @@
+  * making the data processing more efficient.
+  * @param ev the baileys event emitter
+  */
+-const makeEventBuffer = (logger) => {
++const makeEventBuffer = (logger, bufferLiveMessages = true) => {
++    const startedAt = Date.now();
+     const ev = new events_1.default();
+     const historyCache = new Set();
+     let data = makeBufferData();
+@@ -87,6 +88,22 @@
+             };
+         },
+         emit(event, evData) {
++            if (!bufferLiveMessages && event === 'messages.upsert' && evData?.type === 'append') {
++                const fresh = [], historical = [];
++                for (const message of evData.messages || []) {
++                    const raw = message.messageTimestamp;
++                    const timestamp = Number(raw?.toNumber?.() ?? raw?.low ?? raw) * 1000;
++                    const current = Number.isFinite(timestamp) && timestamp >= startedAt - 5000 && timestamp <= Date.now() + 5000;
++                    (current ? fresh : historical).push(message);
++                }
++                if (fresh.length) ev.emit('event', { [event]: { ...evData, type: 'notify', messages: fresh } });
++                if (!historical.length) return true;
++                evData = { ...evData, messages: historical };
++            }
++            const live = event === 'messages.upsert'
++                ? evData?.type === 'notify'
++                : ['messages.update', 'messages.delete', 'messages.reaction', 'message-receipt.update'].includes(event);
++            if (!bufferLiveMessages && live) return ev.emit('event', { [event]: evData });
+             if (buffersInProgress && BUFFERABLE_EVENT_SET.has(event)) {
+                 append(data, historyCache, event, evData, logger);
+                 return true;
+@@ -96,6 +113,9 @@
+         isBuffering() {
+             return buffersInProgress > 0;
+         },
++        isBufferingLiveMessages() {
++            return bufferLiveMessages && buffersInProgress > 0;
++        },
+         buffer,
+         flush,
+         createBufferedFunction(work) {
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js b/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js
+@@ -96,20 +96,22 @@
+     }
+ };
+ exports.parseAndInjectE2ESessions = parseAndInjectE2ESessions;
+-const extractDeviceJids = (result, myJid, excludeZeroDevices) => {
++const extractDeviceJids = (result, myJid, excludeZeroDevices, myLid) => {
+     const { user: myUser, device: myDevice } = (0, WABinary_1.jidDecode)(myJid);
++    const ownUsers = new Set([myUser, myLid && (0, WABinary_1.jidDecode)(myLid).user].filter(Boolean));
+     const extracted = [];
+     for (const userResult of result) {
+         const { devices, id } = userResult;
+-        const { user } = (0, WABinary_1.jidDecode)(id);
++        const { user, server } = (0, WABinary_1.jidDecode)(id);
+         const deviceList = devices === null || devices === void 0 ? void 0 : devices.deviceList;
+         if (Array.isArray(deviceList)) {
+             for (const { id: device, keyIndex } of deviceList) {
+                 if ((!excludeZeroDevices || device !== 0) && // if zero devices are not-excluded, or device is non zero
++                    (device !== 99 || server === 'hosted' || server === 'hosted.lid') &&
+-                    (myUser !== user || myDevice !== device) && // either different user or if me user, not this device
++                    (!ownUsers.has(user) || myDevice !== device) &&
+                     (device === 0 || !!keyIndex) // ensure that "key-index" is specified for "non-zero" devices, produces a bad req otherwise
+                 ) {
+-                    extracted.push({ user, device });
++                    extracted.push({ user, device, server });
+                 }
+             }
+         }
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js b/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
+@@ -35,7 +35,7 @@
+     }
+     const ws = new Client_1.WebSocketClient(url, config);
+     ws.connect();
+-    const ev = (0, Utils_1.makeEventBuffer)(logger);
++    const ev = (0, Utils_1.makeEventBuffer)(logger, config.bufferLiveMessages !== false);
+     /** ephemeral key pair used to encrypt/decrypt communication. Unique for each connection */
+     const ephemeralKeyPair = Utils_1.Curve.generateKeyPair();
+     /** WA noise protocol wrapper */
+@@ -272,13 +272,14 @@
+     };
+     /** generates and uploads a set of pre-keys to the server */
+     const uploadPreKeys = async (count = Defaults_1.INITIAL_PREKEY_COUNT) => {
+-        await keys.transaction(async () => {
++        const node = await keys.transaction(async () => {
+             logger.info({ count }, 'uploading pre-keys');
+             const { update, node } = await (0, Utils_1.getNextPreKeysNode)({ creds, keys }, count);
+-            await query(node);
+             ev.emit('creds.update', update);
+-            logger.info({ count }, 'uploaded pre-keys');
++            return node;
+         });
++        await query(node);
++        logger.info({ count }, 'uploaded pre-keys');
+     };
+     const uploadPreKeysToServerIfRequired = async () => {
+         const preKeyCount = await getAvailablePreKeysOnServer();
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js
+@@ -146,7 +146,7 @@
+         }
+         const result = await sock.executeUSyncQuery(query);
+         if (result) {
+-            const extracted = (0, Utils_1.extractDeviceJids)(result === null || result === void 0 ? void 0 : result.list, authState.creds.me.id, ignoreZeroDevices);
++            const extracted = (0, Utils_1.extractDeviceJids)(result === null || result === void 0 ? void 0 : result.list, authState.creds.me.id, ignoreZeroDevices, authState.creds.me.lid);
+             const deviceMap = {};
+             for (const item of extracted) {
+                 deviceMap[item.user] = deviceMap[item.user] || [];
+@@ -171,7 +171,10 @@
+             const sessions = await authState.keys.get('session', addrs);
+             for (const jid of jids) {
+                 const signalId = signalRepository.jidToSignalProtocolAddress(jid);
+-                if (!sessions[signalId]) {
++                const exists = signalRepository.validateSession
++                    ? (await signalRepository.validateSession(jid)).exists
++                    : !!sessions[signalId];
++                if (!exists) {
+                     jidsRequiringFetch.push(jid);
+                 }
+             }
+@@ -299,7 +302,10 @@
+             const { user, device } = (0, WABinary_1.jidDecode)(participant.jid);
+             devices.push({ user, device });
+         }
+-        await authState.keys.transaction(async () => {
++        const runRelayWork = config.atomicSignalOperations
++            ? async work => work()
++            : work => authState.keys.transaction(work);
++        await runRelayWork(async () => {
+             var _a, _b, _c, _d, _e;
+             const mediaType = getMediaType(message);
+             if (mediaType) {
+@@ -375,8 +381,8 @@
+                     meId
+                 });
+                 const senderKeyJids = [];
+-                for (const { user, device } of devices) {
+-                    const jid = (0, WABinary_1.jidEncode)(user, (groupData === null || groupData === void 0 ? void 0 : groupData.addressingMode) === 'lid' ? 'lid' : 's.whatsapp.net', device);
++                for (const { user, device, server } of devices) {
++                    const jid = (0, WABinary_1.jidEncode)(user, server || ((groupData === null || groupData === void 0 ? void 0 : groupData.addressingMode) === 'lid' ? 'lid' : 's.whatsapp.net'), device);
+                     if (!senderKeyMap[jid] || !!participant) {
+                         senderKeyJids.push(jid);
+                         senderKeyMap[jid] = true;
+@@ -423,14 +429,20 @@
+                 const allJids = [];
+                 const meJids = [];
+                 const otherJids = [];
+-                for (const { user: deviceUser, device } of devices) {
++                const seenRecipients = new Set();
++                const ownDevice = (0, WABinary_1.jidDecode)(authState.creds.me.id).device;
++                for (const { user: deviceUser, device, server } of devices) {
+                     const isMe = deviceUser === meUser || deviceUser === mePhone || deviceUser === meLidUser;
++                    if (isMe && device === ownDevice) continue;
++                    const recipient = isMe ? `own:${device || 0}` : `${server || (isLid ? 'lid' : 's.whatsapp.net')}:${deviceUser}:${device || 0}`;
++                    if (seenRecipients.has(recipient)) continue;
++                    seenRecipients.add(recipient);
+                     let encodedJid;
+                     
+                     if (isMe) {
+-                        encodedJid = (0, WABinary_1.jidEncode)(isLid ? meLidUser || mePhone : mePhone, isLid ? 'lid' : 's.whatsapp.net', device);
++                        encodedJid = (0, WABinary_1.jidEncode)(server ? deviceUser : isLid ? meLidUser || mePhone : mePhone, server || (isLid ? 'lid' : 's.whatsapp.net'), device);
+                     } else {
+-                        encodedJid = (0, WABinary_1.jidEncode)(deviceUser, isLid ? 'lid' : 's.whatsapp.net', device);
++                        encodedJid = (0, WABinary_1.jidEncode)(deviceUser, server || (isLid ? 'lid' : 's.whatsapp.net'), device);
+                     }
+                     
+                     if (isMe) {
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
+@@ -21,6 +21,8 @@
+     const { ev, authState, ws, processingMutex, signalRepository, query, upsertMessage, resyncAppState, onUnexpectedError, assertSessions, sendNode, relayMessage, sendReceipt, uploadPreKeys, sendPeerDataOperationMessage } = sock;
+     /** this mutex ensures that each retryRequest will wait for the previous one to finish */
+     const retryMutex = (0, make_mutex_1.makeMutex)();
++    const receiptMutex = (0, make_mutex_1.makeMutex)();
++    const placeholderResendMutex = (0, make_mutex_1.makeMutex)();
+     const msgRetryCache = config.msgRetryCounterCache ||
+         new node_cache_1.default({
+             stdTTL: Defaults_1.DEFAULT_CACHE_TTLS.MSG_RETRY, // 1 hour
+@@ -470,17 +471,20 @@
+         const newValue = (msgRetryCache.get(key) || 0) + 1;
+         msgRetryCache.set(key, newValue);
+     };
+-    const sendMessagesAgain = async (key, ids, retryNode) => {
++    const sendMessagesAgain = async (key, ids, retryNode, receiptNode) => {
+         var _a;
+         // todo: implement a cache to store the last 256 sent messages (copy whatsmeow)
+         const msgs = await Promise.all(ids.map(id => getMessage({ ...key, id })));
++        if (!msgs.some(Boolean)) return;
+         const remoteJid = key.remoteJid;
+         const participant = key.participant || remoteJid;
+         // if it's the primary jid sending the request
+         // just re-send the message to everyone
+         // prevents the first message decryption failure
+         const sendToAll = !((_a = (0, WABinary_1.jidDecode)(participant)) === null || _a === void 0 ? void 0 : _a.device);
+-        await assertSessions([participant], true);
++        const bundle = receiptNode && Utils_1.extractE2ESessionFromRetryReceipt(receiptNode);
++        if (bundle) await signalRepository.injectE2ESession({ jid: participant, session: bundle });
++        else await assertSessions([participant], true);
+         if ((0, WABinary_1.isJidGroup)(remoteJid)) {
+             await authState.keys.set({ 'sender-key-memory': { [remoteJid]: null } });
+         }
+@@ -507,6 +511,13 @@
+     };
+     const handleReceipt = async (node) => {
+         var _a, _b;
++        let acknowledged = false;
++        const acknowledge = async () => {
++            if (acknowledged) return;
++            acknowledged = true;
++            await sendMessageAck(node);
++        };
++        if (config.prioritizeLiveMessages) await acknowledge();
+         const { attrs, content } = node;
+         const isLid = attrs.from.includes('lid');
+         const isNodeFromMe = (0, WABinary_1.areJidsSameUser)(attrs.participant || attrs.from, isLid ? (_a = authState.creds.me) === null || _a === void 0 ? void 0 : _a.lid : (_b = authState.creds.me) === null || _b === void 0 ? void 0 : _b.id);
+@@ -520,7 +531,7 @@
+         };
+         if (shouldIgnoreJid(remoteJid) && remoteJid !== '@s.whatsapp.net') {
+             logger.debug({ remoteJid }, 'ignoring receipt from jid');
+-            await sendMessageAck(node);
++            await acknowledge();
+             return;
+         }
+         const ids = [attrs.id];
+@@ -530,7 +541,7 @@
+         }
+         try {
+             await Promise.all([
+-                processingMutex.mutex(async () => {
++                (config.prioritizeLiveMessages ? receiptMutex : processingMutex).mutex(async () => {
+                     const status = (0, Utils_1.getStatusFromReceiptType)(attrs.type);
+                     if (typeof status !== 'undefined' &&
+                         // basically, we only want to know when a message from us has been delivered to/read by the other person
+@@ -563,7 +574,7 @@
+                             if (key.fromMe) {
+                                 try {
+                                     logger.debug({ attrs, key }, 'recv retry request');
+-                                    await sendMessagesAgain(key, ids, retryNode);
++                                    await sendMessagesAgain(key, ids, retryNode, node);
+                                 }
+                                 catch (error) {
+                                     logger.error({ key, ids, trace: error.stack }, 'error in sending message again');
+@@ -581,7 +592,7 @@
+             ]);
+         }
+         finally {
+-            await sendMessageAck(node);
++            await acknowledge();
+         }
+     };
+     const handleNotification = async (node) => {
+@@ -642,6 +654,11 @@
+         if ((0, WABinary_1.getBinaryNodeChild)(node, 'unavailable') && !encNode) {
+             await sendMessageAck(node);
+             const { key } = (0, Utils_1.decodeMessageNode)(node, authState.creds.me.id, authState.creds.me.lid || '').fullMessage;
++            if (config.prioritizeLiveMessages) {
++                placeholderResendMutex.mutex(() => requestPlaceholderResend(key))
++                    .catch(error => onUnexpectedError(error, 'recovering unavailable message'));
++                return;
++            }
+             response = await requestPlaceholderResend(key);
+             if (response === 'RESOLVED') {
+                 return;
+@@ -840,8 +857,12 @@
+         ev.buffer();
+-        await execTask();
+-        ev.flush();
++        try {
++            await execTask();
++        }
++        finally {
++            ev.flush();
++        }
+         function execTask() {
+             return exec(node, false).catch(err => onUnexpectedError(err, identifier));
+         }
+     };
+     const makeOfflineNodeProcessor = () => {
+@@ -854,6 +869,8 @@
+         const nodes = [];
+         let isProcessing = false;
++        let activeType;
++        let activeSince;
+         const enqueue = (type, node) => {
+             nodes.push({ type, node });
+             if (isProcessing) {
+                 return;
+@@ -863,18 +880,37 @@
+             isProcessing = true;
+             const promise = async () => {
+-                while (nodes.length && ws.isOpen) {
+-                    const { type, node } = nodes.shift();
+-                    const nodeProcessor = nodeProcessorMap.get(type);
+-                    if (!nodeProcessor) {
+-                        onUnexpectedError(new Error(`unknown offline node type: ${type}`), 'processing offline node');
+-                        continue;
++                try {
++                    while (nodes.length && ws.isOpen) {
++                        const { type, node } = nodes.shift();
++                        const nodeProcessor = nodeProcessorMap.get(type);
++                        if (!nodeProcessor) {
++                            onUnexpectedError(new Error(`unknown offline node type: ${type}`), 'processing offline node');
++                            continue;
++                        }
++                        try {
++                            activeType = type;
++                            activeSince = Date.now();
++                            await nodeProcessor(node);
++                        }
++                        catch (error) {
++                            onUnexpectedError(error, 'processing offline node');
++                        }
++                        finally {
++                            activeType = undefined;
++                            activeSince = undefined;
++                        }
+                     }
+-                    await nodeProcessor(node);
+                 }
+-                isProcessing = false;
++                finally {
++                    isProcessing = false;
++                }
+             };
+             promise().catch(error => onUnexpectedError(error, 'processing offline nodes'));
+         };
+-        return { enqueue };
++        return { enqueue, snapshot: () => ({
++            pending: nodes.length,
++            activeType: activeType || null,
++            activeForMs: activeSince === undefined ? null : Date.now() - activeSince,
++        }) };
+     };
+     const offlineNodeProcessor = makeOfflineNodeProcessor();
+@@ -883,8 +919,12 @@
+     const offlineNodeProcessor = makeOfflineNodeProcessor();
++    const receiveStartedAt = Date.now();
+     const processNode = (type, node, identifier, exec) => {
+         const isOffline = !!node.attrs.offline;
+-        if (isOffline) {
++        const timestamp = Number(node.attrs.t) * 1000;
++        const freshMessage = type === 'message' && Number.isFinite(timestamp) &&
++            timestamp >= receiveStartedAt - 5000 && timestamp <= Date.now() + 5000;
++        if (isOffline && !(config.prioritizeLiveMessages && (type === 'receipt' || freshMessage))) {
+             offlineNodeProcessor.enqueue(type, node);
+         }
+         else {
+             processNodeWithBuffer(node, identifier, exec);
+@@ -1088,6 +1128,7 @@
+     return {
+         ...sock,
++        getOfflineQueueState: () => offlineNodeProcessor.snapshot(),
+         sendMessageAck,
+         sendRetryRequest,
+         rejectCall,
+         fetchMessageHistory,

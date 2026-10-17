@@ -35,6 +35,7 @@ const GROUP_SETTING_DEFAULTS = {
     GOODBYE_MESSAGE: "false",
     GROUP_EVENTS: "false",
     ANTILINK: "false",
+    LOCKURL: "false",
     ANTILINK_WARN_COUNT: "5",
     WELCOME_MESSAGE_TEXT: "",
     GOODBYE_MESSAGE_TEXT: "",

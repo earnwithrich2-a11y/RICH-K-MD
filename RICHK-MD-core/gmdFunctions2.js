@@ -77,10 +77,15 @@ const GiftedAntiLink = async (Gifted, message, getGroupMetadata, lockOnly = fals
             await enforceGroupLinkLock(Gifted, message, getGroupMetadata);
             return;
         }
-        if (lockOnly || message.key.fromMe) return;
         const antiLink = await getGroupSetting(from, 'ANTILINK');
         
         if (!antiLink || antiLink === 'false' || antiLink === 'off') return;
+        if (['on', 'true', 'delete'].includes(antiLink.toLowerCase())) {
+            const { enforceSmartAntiLink } = require('./smartAntiLink');
+            await enforceSmartAntiLink(Gifted, message, getGroupMetadata, getAllSettings);
+            return;
+        }
+        if (lockOnly || message.key.fromMe) return;
 
         const messageType = Object.keys(message.message)[0];
         const body = messageType === 'conversation'

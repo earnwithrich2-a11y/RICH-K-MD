@@ -57,8 +57,6 @@ const {
     createContext2,
     verifyJidState,
     GiftedPresence,
-    GiftedAntiDelete,
-    GiftedAntiEdit,
     syncDatabase,
     initializeSettings,
     initializeGroupSettings,
@@ -82,19 +80,17 @@ const {
 } = require("./RICHK-MD-core");
 
 const {
-    saveAntiDelete,
-    findAntiDelete,
-    removeAntiDelete,
     startCleanup,
     SQLiteStore,
 } = require('./RICHK-MD-core/database/messageStore');
 
-const {
-    createAntiDeleteRecovery,
-} = require('./RICHK-MD-core/connection/antiDeleteRecovery');
 const { findMessageForRetryWithWait } = require('./RICHK-MD-core/connection/messageRetry');
 const { persistOwnOutgoingMessages } = require('./RICHK-MD-core/connection/outgoingMessageStore');
 const { trackSelfChatDelivery } = require('./RICHK-MD-core/connection/selfChatDelivery');
+const { installBranding, runCommandOutput } = require("./RICHK-MD-core/branding");
+const { MenuPromo } = require("./RICHK-MD-core/connection/menuPromo");
+const { RecoveryArchive } = require("./RICHK-MD-core/connection/recoveryArchive");
+const { installMessageRecovery } = require("./RICHK-MD-core/connection/messageRecovery");
 const config = require("./config");
 const googleTTS = require("google-tts-api");
 const fs = require("fs-extra");
@@ -137,6 +133,17 @@ let Gifted;
 let store;
 
 logger.level = "silent";
+// The static page must never expose WhatsApp login databases or cached originals.
+app.use((req, res, next) => {
+    let pathname;
+    try { pathname = path.posix.normalize(decodeURIComponent(req.path)); }
+    catch { return res.sendStatus(400); }
+    if (/^\/(?:session|database)(?:\/|$)/i.test(pathname) ||
+        /\.(?:db|sqlite)(?:-wal|-shm|-journal)?$/i.test(pathname)) {
+        return res.sendStatus(403);
+    }
+    next();
+});
 app.use(express.static("RICHK-MD-core"));
 app.get("/", (req, res) => res.sendFile(__dirname + "/RICHK-MD-core/richk-md.html"));
 app.get("/health", (req, res) =>
@@ -145,6 +152,8 @@ app.get("/health", (req, res) =>
         uptime: process.uptime(),
         whatsapp: {
             connected: Gifted?.ws?.isOpen === true,
+            authRequired: Gifted?.authRequired === true,
+            connectionReplaced: Gifted?.connectionReplaced === true,
             bufferingMessages: (Gifted?.ev?.isBufferingLiveMessages
                 ? Gifted.ev.isBufferingLiveMessages()
                 : Gifted?.ev?.isBuffering?.()) === true,
@@ -170,6 +179,8 @@ setInterval(async () => {
 }, 240000);
 
 const sessionDir = path.join(__dirname, "RICHK-MD-core", "session");
+let recoveryArchive;
+let menuPromo;
 const pluginsPath = path.join(__dirname, "RICHK-MD-commands");
 if (smokeTestMode) {
     loadPlugins(pluginsPath, {
@@ -269,6 +280,8 @@ async function startGifted() {
         Gifted = giftedConnect(socketConfig);
         attachCommandDiagnostics(Gifted);
         persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
+        installBranding(Gifted);
+        menuPromo ||= new MenuPromo(path.join(sessionDir, "menu-promos.db"));
         trackSelfChatDelivery(Gifted);
         store.bind(Gifted.ev);
 
@@ -277,13 +290,18 @@ async function startGifted() {
         });
 
         setupAutoReact(Gifted);
-        setupAntiDelete(Gifted);
+        recoveryArchive ||= new RecoveryArchive(path.join(sessionDir, "recovery"));
+        installMessageRecovery(Gifted, {
+            archive: recoveryArchive,
+            getSettings: getAllSettings,
+            download: downloadMediaMessage,
+            revokeType: WAMessageStubType.REVOKE,
+        });
         setupAutoBio(Gifted);
         setupAntiCall(Gifted);
         setupNewsletterReact(Gifted);
         setupPresence(Gifted);
         setupChatBotAndAntiLink(Gifted);
-        setupAntiEdit(Gifted);
         setupStatusHandlers(Gifted);
         setupGroupEventsListeners(Gifted);
 
@@ -403,139 +421,6 @@ function setupAutoReact(Gifted) {
     });
 }
 
-function setupAntiDelete(Gifted) {
-    const botJid = `${Gifted.user?.id.split(":")[0]}@s.whatsapp.net`;
-    const botOwnerJid = botJid;
-
-    const getSender = (ms) => {
-        const key = ms.key;
-        const realJid = (j) => j && !j.endsWith('@lid') ? j : null;
-        return (
-            realJid(key.participantPn) ||
-            realJid(key.senderPn) ||
-            realJid(ms.senderPn) ||
-            realJid(key.participant) ||
-            realJid(ms.participant) ||
-            key.participantPn ||
-            key.participant ||
-            ms.participant ||
-            (key.remoteJid?.endsWith("@g.us") ? null : realJid(key.remoteJid) || key.remoteJid)
-        );
-    };
-
-    const getPushName = (ms) => {
-        return (
-            ms.pushName || ms.key?.pushName || ms.verifiedBizName || "Unknown"
-        );
-    };
-
-    const isProtocolMessage = (ms) => {
-        return (
-            ms.message?.protocolMessage ||
-            ms.message?.ephemeralMessage?.message?.protocolMessage ||
-            ms.message?.viewOnceMessage?.message?.protocolMessage ||
-            ms.message?.viewOnceMessageV2?.message?.protocolMessage
-        );
-    };
-
-    const getProtocolMessage = (ms) => {
-        return (
-            ms.message?.protocolMessage ||
-            ms.message?.ephemeralMessage?.message?.protocolMessage ||
-            ms.message?.viewOnceMessage?.message?.protocolMessage ||
-            ms.message?.viewOnceMessageV2?.message?.protocolMessage
-        );
-    };
-
-    const getActualMessage = (ms) => {
-        const msg = ms.message;
-        if (!msg) return null;
-        return (
-            msg.ephemeralMessage?.message ||
-            msg.viewOnceMessage?.message ||
-            msg.viewOnceMessageV2?.message ||
-            msg.documentWithCaptionMessage?.message ||
-            msg
-        );
-    };
-
-    const handleDeletedMessage = createAntiDeleteRecovery({
-        Gifted,
-        GiftedAntiDelete,
-        findAntiDelete,
-        removeAntiDelete,
-        getSender,
-        botOwnerJid,
-    });
-
-    Gifted.ev.on("messages.update", async (updates) => {
-        for (const update of updates || []) {
-            try {
-                if (
-                    update?.update?.messageStubType !==
-                    WAMessageStubType.REVOKE
-                ) {
-                    continue;
-                }
-
-                const revokeKey = update.update?.key || update.key;
-                await handleDeletedMessage(
-                    update.key?.remoteJid || revokeKey?.remoteJid,
-                    update.key?.id || revokeKey?.id,
-                    revokeKey,
-                );
-            } catch (error) {
-                logger.error("Anti-delete revoke event error:", error);
-            }
-        }
-    });
-
-    Gifted.ev.on("messages.upsert", async ({ messages }) => {
-        for (const ms of messages) {
-            try {
-                if (!ms?.message) continue;
-
-                const { key } = ms;
-                if (
-                    !key?.remoteJid ||
-                    key.fromMe ||
-                    key.remoteJid === "status@broadcast"
-                )
-                    continue;
-
-                const protocolMsg = getProtocolMessage(ms);
-                if (protocolMsg?.type === 0) {
-                    const deleteKey = protocolMsg.key;
-                    await handleDeletedMessage(
-                        key.remoteJid,
-                        deleteKey?.id,
-                        key,
-                        getPushName(ms),
-                    );
-                    continue;
-                }
-
-                if (isProtocolMessage(ms)) continue;
-
-                const actualMessage = getActualMessage(ms);
-                if (!actualMessage) continue;
-
-                const sender = getSender(ms);
-                const senderPushName = getPushName(ms);
-
-                if (!sender || sender === botJid || sender === botOwnerJid)
-                    continue;
-
-                const _jid = key.remoteJid;
-                const _entry = { ...ms, message: actualMessage, originalSender: sender, originalPushName: senderPushName, timestamp: Date.now() };
-                saveAntiDelete(_jid, _entry);
-            } catch (error) {
-                logger.error("Anti-delete system error:", error);
-            }
-        }
-    });
-}
-
 function setupAutoBio(Gifted) {
     (async () => {
         const s = await getAllSettings();
@@ -648,21 +533,6 @@ function setupChatBotAndAntiLink(Gifted) {
             }
             await GiftedAntiGroupMention(Gifted, message, getGroupMetadata);
             await handleGameMessage(Gifted, message);
-        }
-    });
-}
-
-function setupAntiEdit(Gifted) {
-    Gifted.ev.on("messages.update", async (updates) => {
-        for (const update of updates) {
-            try {
-                if (!update?.update?.message) continue;
-                if (update.key?.fromMe) continue;
-                if (update.key?.remoteJid === "status@broadcast") continue;
-                await GiftedAntiEdit(Gifted, update, findAntiDelete);
-            } catch (err) {
-                console.error("Anti-edit handler error:", err.message);
-            }
         }
     });
 }
@@ -934,7 +804,8 @@ function setupCommandHandler(Gifted) {
                     body,
                     command,
                 });
-                await bodyCmd.function(from, Gifted, conText);
+                await runCommandOutput(command || bodyCmd.pattern, settings,
+                    () => bodyCmd.function(from, Gifted, conText));
             } catch (error) {
                 console.error(`Body command error:`, error);
             }
@@ -982,13 +853,15 @@ function setupCommandHandler(Gifted) {
                     command,
                 });
 
-                await gmd.function(from, Gifted, conText);
+                await runCommandOutput(command, settings, () => gmd.function(from, Gifted, conText));
+                void menuPromo.maybeSend(Gifted, command, ms).catch(() =>
+                    console.warn("[Menu promo] Could not process cooldown."));
                 Gifted.commandDiagnostics?.mark("commandsCompleted");
                 console.info("[WhatsApp] Command handler completed.");
             } catch (error) {
                 console.error(`Command error [${command}]:`, error);
                 try {
-                    await Gifted.sendMessage(
+                    await runCommandOutput(command, settings, async () => Gifted.sendMessage(
                         from,
                         {
                             text: `🚨 Command failed: ${error.message}`,
@@ -998,7 +871,7 @@ function setupCommandHandler(Gifted) {
                             })),
                         },
                         { quoted: ms },
-                    );
+                    ));
                 } catch (sendErr) {
                     console.error("Error sending error message:", sendErr);
                 }
@@ -1144,8 +1017,8 @@ function buildContext(ms, settings, helpers, data) {
         isSuperUser: data.isSuperUser,
         botMode: settings.MODE,
         botPic: settings.BOT_PIC,
-        botFooter: settings.FOOTER,
-        botCaption: settings.CAPTION,
+        botFooter: ["menu", "settings"].includes(data.command) ? settings.FOOTER : "",
+        botCaption: ["menu", "settings"].includes(data.command) ? settings.CAPTION : "",
         botVersion: settings.VERSION,
         ownerNumber: settings.OWNER_NUMBER,
         ownerName: settings.OWNER_NAME,
@@ -1179,7 +1052,7 @@ if (!smokeTestMode) {
         await loadBotSettings();
         await startGifted();
     })().catch((error) => {
-        console.error("Bot startup failed:", error);
-        process.exitCode = 1;
+        console.error("Bot startup failed; supervisor will retry without changing the login.");
+        process.exit(1);
     });
 }

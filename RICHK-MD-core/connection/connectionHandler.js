@@ -64,7 +64,6 @@ const setupConnectionHandler = (
 
         if (connection === "connecting") {
             console.log("🕗 Connecting Bot...");
-            reconnectAttempts = 0;
         }
 
         if (connection === "open") {
@@ -101,33 +100,23 @@ const setupConnectionHandler = (
             switch (reason) {
                 case DisconnectReason.badSession:
                     console.log(
-                        "Bad session file, automatically deleted...please scan again",
+                        "WhatsApp rejected the session. Login data is preserved; re-pairing requires approval.",
                     );
-                    try {
-                        await fs.remove(sessionDir);
-                    } catch (e) {
-                        console.error("Failed to remove session:", e);
-                    }
-                    process.exit(1);
+                    Gifted.authRequired = true;
                     break;
 
                 case DisconnectReason.connectionReplaced:
                     console.log(
                         "Connection replaced, another new session opened",
                     );
-                    process.exit(1);
+                    Gifted.connectionReplaced = true;
                     break;
 
                 case DisconnectReason.loggedOut:
                     console.log(
-                        "Device logged out, session file automatically deleted...please scan again",
+                        "WhatsApp reported a logout. Login data is preserved; re-pairing requires approval.",
                     );
-                    try {
-                        await fs.remove(sessionDir);
-                    } catch (e) {
-                        console.error("❌ Failed to remove session:", e);
-                    }
-                    process.exit(1);
+                    Gifted.authRequired = true;
                     break;
 
                 case DisconnectReason.connectionClosed:
