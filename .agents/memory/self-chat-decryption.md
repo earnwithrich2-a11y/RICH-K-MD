@@ -17,7 +17,7 @@ A readable human command and an available retry payload do not prove that the bo
 
 A fresh self-chat text reply was phone-side confirmed; this is historical evidence, not a guarantee of current readiness.
 
-**Why:** On 2026-10-08, the user explicitly confirmed that sending a new `.ping` in their WhatsApp self-chat produced a readable reply.
+**Why:** On 2026-10-08, the user explicitly confirmed that sending a new `.ping` in their WhatsApp self-chat produced a readable reply. On 2026-10-17, after approving replacement of a logged-out session, the user again confirmed a readable fresh self-chat `.ping` reply with the new login.
 
 **How to apply:** Treat this as evidence for that confirmed flow. Later no-response reports require new runtime checks and a fresh phone-side reply. This confirmation does not establish recovery of older pending messages or delivery of every media, group, or external-service command.
 
