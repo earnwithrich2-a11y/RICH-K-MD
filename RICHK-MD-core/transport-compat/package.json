@@ -5,6 +5,7 @@
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./transactions": "./transactions.js",
     "./lib/Utils": "./utils.js",
     "./lib/Utils/auth-utils": "./auth-utils.js",
     "./lib/Utils/event-buffer": "./event-buffer.js",

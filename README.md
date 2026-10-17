@@ -20,12 +20,29 @@ The source is organized into `RICHK-MD-core` (runtime, settings and local data) 
 
 ## Setup
 
-1. Install Node.js 20 or newer.
+1. Install Node.js 20.19 or newer (CommonJS plugins use Node's supported ESM interoperability).
 2. Install dependencies:
 
    ```bash
    npm install
    ```
+
+   `.npmrc` enables legacy peer-dependency resolution for hosting builds.
+   The WhatsApp SDK is pinned to the version matching the checked-in security
+   patches; do not update it without updating and testing those patches.
+
+   After installing dependencies in Replit, normalize the generated lockfile
+   before committing or deploying:
+
+   ```bash
+   npm run lockfile:portable
+   ```
+
+   Before a subsequent clean install in Replit, use
+   `npm run lockfile:portable -- --replit` to retain the package firewall's
+   required `/npm/` download prefix. After installation, run the portable
+   command again. This changes download URLs only, not versions or integrity
+   hashes. Heroku uses the committed public-registry URLs directly.
 
 3. Add `SESSION_ID` through Replit Secrets or your hosting provider.
 4. Start RICHK-MD:

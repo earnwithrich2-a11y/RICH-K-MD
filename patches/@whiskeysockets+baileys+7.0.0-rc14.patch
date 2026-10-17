@@ -1,0 +1,337 @@
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
+index f2003ac..233d07e 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-recv.js
+@@ -1069,6 +1069,7 @@ export const makeMessagesRecvSocket = (config) => {
+             }
+             msgs.push(msg);
+         }
++        if (!msgs.some(Boolean)) return;
+         // if it's the primary jid sending the request
+         // just re-send the message to everyone
+         // prevents the first message decryption failure
+@@ -1159,6 +1160,13 @@ export const makeMessagesRecvSocket = (config) => {
+         }
+     };
+     const handleReceipt = async (node) => {
++        let acknowledged = false;
++        const acknowledge = async () => {
++            if (acknowledged) return;
++            acknowledged = true;
++            await sendMessageAck(node);
++        };
++        if (config.prioritizeLiveMessages) await acknowledge();
+         const { attrs, content } = node;
+         const isLid = attrs.from.includes('lid');
+         const isNodeFromMe = areJidsSameUser(attrs.participant || attrs.from, isLid ? authState.creds.me?.lid : authState.creds.me?.id);
+@@ -1229,7 +1237,7 @@ export const makeMessagesRecvSocket = (config) => {
+             ]);
+         }
+         finally {
+-            await sendMessageAck(node).catch(ackErr => logger.error({ ackErr }, 'failed to ack receipt'));
++            await acknowledge().catch(ackErr => logger.error({ ackErr }, 'failed to ack receipt'));
+         }
+     };
+     const handleNotification = async (node) => {
+@@ -1265,6 +1273,18 @@ export const makeMessagesRecvSocket = (config) => {
+     };
+     const handleMessage = async (node) => {
+         const encNode = getBinaryNodeChild(node, 'enc');
++        if (config.prioritizeLiveMessages && !encNode && getBinaryNodeChild(node, 'unavailable')) {
++            await sendMessageAck(node);
++            const { fullMessage } = decodeMessageNode(node, authState.creds.me.id, authState.creds.me.lid || '');
++            const unavailableType = getBinaryNodeChild(node, 'unavailable')?.attrs?.type;
++            if (!['bot_unavailable_fanout', 'hosted_unavailable_fanout', 'view_once_unavailable_fanout'].includes(unavailableType)) {
++                void requestPlaceholderResend(fullMessage.key, {
++                    key: fullMessage.key, messageTimestamp: fullMessage.messageTimestamp,
++                    pushName: fullMessage.pushName, participant: fullMessage.participant,
++                }).catch(err => onUnexpectedError(err, 'recovering unavailable message'));
++            }
++            return;
++        }
+         // TODO: temporary fix for crashes and issues resulting of failed msmsg decryption
+         if (encNode?.attrs.type === 'msmsg') {
+             logger.debug({ key: node.attrs.key }, 'ignored msmsg');
+@@ -1570,8 +1590,11 @@ export const makeMessagesRecvSocket = (config) => {
+     /// and adds the task to the existing buffer if we're buffering events
+     const processNodeWithBuffer = async (node, identifier, exec) => {
+         ev.buffer();
+-        await execTask();
+-        ev.flush();
++        try {
++            await execTask();
++        } finally {
++            ev.flush();
++        }
+         function execTask() {
+             return exec(node, false).catch(err => onUnexpectedError(err, identifier));
+         }
+@@ -1586,6 +1609,7 @@ export const makeMessagesRecvSocket = (config) => {
+         onUnexpectedError,
+         yieldToEventLoop: () => new Promise(resolve => setImmediate(resolve))
+     });
++    const receiveStartedAt = Date.now();
+     const processNode = async (type, node, identifier, exec) => {
+         // Fast path: ack and drop ignored JIDs before entering the buffer/queue
+         const from = node.attrs.from;
+@@ -1601,7 +1625,10 @@ export const makeMessagesRecvSocket = (config) => {
+             return;
+         }
+         const isOffline = !!node.attrs.offline;
+-        if (isOffline) {
++        const timestamp = Number(node.attrs.t) * 1000;
++        const freshMessage = type === 'message' && Number.isFinite(timestamp) &&
++            timestamp >= receiveStartedAt - 5000 && timestamp <= Date.now() + 5000;
++        if (isOffline && !(config.prioritizeLiveMessages && (type === 'receipt' || freshMessage))) {
+             offlineNodeProcessor.enqueue(type, node);
+         }
+         else {
+@@ -1761,6 +1788,7 @@ export const makeMessagesRecvSocket = (config) => {
+     }
+     return {
+         ...sock,
++        getOfflineQueueState: () => offlineNodeProcessor.snapshot(),
+         sendMessageAck,
+         sendRetryRequest,
+         rejectCall,
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js
+index d61e064..726f56d 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/messages-send.js
+@@ -625,7 +625,7 @@ export const makeMessagesSocket = (config) => {
+                             ? jidEncode(jidDecode(meLid)?.user, 'lid', undefined)
+                             : jidEncode(jidDecode(meId)?.user, 's.whatsapp.net', undefined);
+                         // Enumerate devices for sender and target with consistent addressing
+-                        const sessionDevices = await getUSyncDevices([senderIdentity, jid], true, false);
++                        const sessionDevices = await getUSyncDevices([senderIdentity, jid], useUserDevicesCache, false);
+                         devices.push(...sessionDevices);
+                         logger.debug({
+                             deviceCount: devices.length,
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js b/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
+index ae34a8f..0a62538 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Socket/socket.js
+@@ -264,7 +264,7 @@ export const makeSocket = (config) => {
+         }
+         return [];
+     };
+-    const ev = makeEventBuffer(logger);
++    const ev = makeEventBuffer(logger, !config.prioritizeLiveMessages);
+     const { creds } = authState;
+     // add transaction capability
+     const keys = addTransactionCapability(authState.keys, logger, transactionOpts);
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/auth-utils.js b/node_modules/@whiskeysockets/baileys/lib/Utils/auth-utils.js
+index 24a3583..30f60f7 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/auth-utils.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/auth-utils.js
+@@ -8,13 +8,16 @@ import { DEFAULT_CACHE_TTLS } from '../Defaults/index.js';
+ import { Curve, signedKeyPair } from './crypto.js';
+ import { delay, generateRegistrationId } from './generics.js';
+ import { PreKeyManager } from './pre-key-manager.js';
++import protectedKeys from 'gifted-baileys/transactions';
++export const makeCacheableSignalKeyStore = protectedKeys.makeCacheableSignalKeyStore;
++export const addTransactionCapability = protectedKeys.addTransactionCapability;
+ /**
+  * Adds caching capability to a SignalKeyStore
+  * @param store the store to add caching to
+  * @param logger to log trace events
+  * @param _cache cache store to use
+  */
+-export function makeCacheableSignalKeyStore(store, logger, _cache) {
++function upstreamMakeCacheableSignalKeyStore(store, logger, _cache) {
+     const cache = _cache ||
+         new NodeCache({
+             stdTTL: DEFAULT_CACHE_TTLS.SIGNAL_STORE, // 5 minutes
+@@ -81,7 +84,7 @@ export function makeCacheableSignalKeyStore(store, logger, _cache) {
+  * @param logger logger to log events
+  * @returns SignalKeyStore with transaction capability
+  */
+-export const addTransactionCapability = (state, logger, { maxCommitRetries, delayBetweenTriesMs }) => {
++const upstreamAddTransactionCapability = (state, logger, { maxCommitRetries, delayBetweenTriesMs }) => {
+     const txStorage = new AsyncLocalStorage();
+     // Queues for concurrency control (keyed by signal data type - bounded set)
+     const keyQueues = new Map();
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/crypto.js b/node_modules/@whiskeysockets/baileys/lib/Utils/crypto.js
+index 5534efc..f915553 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/crypto.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/crypto.js
+@@ -22,8 +22,7 @@ export const Curve = {
+     sign: (privateKey, buf) => curve.calculateSignature(privateKey, buf),
+     verify: (pubKey, message, signature) => {
+         try {
+-            curve.verifySignature(generateSignalPubKey(pubKey), message, signature);
+-            return true;
++            return curve.verifySignature(generateSignalPubKey(pubKey), message, signature) !== false;
+         }
+         catch (error) {
+             return false;
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js b/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js
+index 9b32e6f..3e03c1c 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/event-buffer.js
+@@ -22,7 +22,8 @@ const BUFFERABLE_EVENT_SET = new Set(BUFFERABLE_EVENT);
+  * The event buffer logically consolidates different events into a single event
+  * making the data processing more efficient.
+  */
+-export const makeEventBuffer = (logger) => {
++export const makeEventBuffer = (logger, bufferLiveMessages = true) => {
++    const startedAt = Date.now();
+     const ev = new EventEmitter();
+     const historyCache = new Set();
+     let data = makeBufferData();
+@@ -49,17 +50,18 @@ export const makeEventBuffer = (logger) => {
+             bufferTimeout = setTimeout(() => {
+                 if (isBuffering) {
+                     logger.warn('Buffer timeout reached, auto-flushing');
+-                    flush();
++                    flush(true);
+                 }
+             }, BUFFER_TIMEOUT_MS);
+         }
+         // Always increment count when requested
+         bufferCount++;
+     }
+-    function flush() {
++    function flush(force = false) {
+         if (!isBuffering) {
+             return false;
+         }
++        if (!force && --bufferCount > 0) return false;
+         logger.debug({ bufferCount }, 'Flushing event buffer');
+         isBuffering = false;
+         bufferCount = 0;
+@@ -106,6 +108,22 @@ export const makeEventBuffer = (logger) => {
+             };
+         },
+         emit(event, evData) {
++            if (!bufferLiveMessages && event === 'messages.upsert' && evData?.type === 'append') {
++                const fresh = [], historical = [];
++                for (const message of evData.messages || []) {
++                    const raw = message.messageTimestamp;
++                    const timestamp = Number(raw?.toNumber?.() ?? raw?.low ?? raw) * 1000;
++                    const current = Number.isFinite(timestamp) && timestamp >= startedAt - 5000 && timestamp <= Date.now() + 5000;
++                    (current ? fresh : historical).push(message);
++                }
++                if (fresh.length) ev.emit('event', { [event]: { ...evData, type: 'notify', messages: fresh } });
++                if (!historical.length) return true;
++                evData = { ...evData, messages: historical };
++            }
++            const live = event === 'messages.upsert'
++                ? evData?.type === 'notify'
++                : ['messages.update', 'messages.delete', 'messages.reaction', 'message-receipt.update'].includes(event);
++            if (!bufferLiveMessages && live) return ev.emit('event', { [event]: evData });
+             // Check if this is a messages.upsert with a different type than what's buffered
+             // If so, flush the buffered messages first to avoid type overshadowing
+             if (event === 'messages.upsert') {
+@@ -136,6 +154,9 @@ export const makeEventBuffer = (logger) => {
+         isBuffering() {
+             return isBuffering;
+         },
++        isBufferingLiveMessages() {
++            return bufferLiveMessages && isBuffering;
++        },
+         buffer,
+         flush,
+         createBufferedFunction(work) {
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/offline-node-processor.js b/node_modules/@whiskeysockets/baileys/lib/Utils/offline-node-processor.js
+index 3ad5c79..1dc1470 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/offline-node-processor.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/offline-node-processor.js
+@@ -7,6 +7,8 @@
+ export function makeOfflineNodeProcessor(nodeProcessorMap, deps, batchSize = 10) {
+     const nodes = [];
+     let isProcessing = false;
++    let activeType;
++    let activeSince;
+     const enqueue = (type, node) => {
+         nodes.push({ type, node });
+         if (isProcessing) {
+@@ -15,14 +17,24 @@ export function makeOfflineNodeProcessor(nodeProcessorMap, deps, batchSize = 10)
+         isProcessing = true;
+         const promise = async () => {
+             let processedInBatch = 0;
+-            while (nodes.length && deps.isWsOpen()) {
++            try {
++              while (nodes.length && deps.isWsOpen()) {
+                 const { type, node } = nodes.shift();
+                 const nodeProcessor = nodeProcessorMap.get(type);
+                 if (!nodeProcessor) {
+                     deps.onUnexpectedError(new Error(`unknown offline node type: ${type}`), 'processing offline node');
+                     continue;
+                 }
+-                await nodeProcessor(node).catch(err => deps.onUnexpectedError(err, `processing offline ${type}`));
++                try {
++                    activeType = type;
++                    activeSince = Date.now();
++                    await nodeProcessor(node);
++                } catch (err) {
++                    deps.onUnexpectedError(err, `processing offline ${type}`);
++                } finally {
++                    activeType = undefined;
++                    activeSince = undefined;
++                }
+                 processedInBatch++;
+                 // Yield to event loop after processing a batch
+                 // This prevents blocking the event loop for too long when there are many offline nodes
+@@ -30,11 +42,17 @@ export function makeOfflineNodeProcessor(nodeProcessorMap, deps, batchSize = 10)
+                     processedInBatch = 0;
+                     await deps.yieldToEventLoop();
+                 }
++              }
++            } finally {
++                isProcessing = false;
+             }
+-            isProcessing = false;
+         };
+         promise().catch(error => deps.onUnexpectedError(error, 'processing offline nodes'));
+     };
+-    return { enqueue };
++    return { enqueue, snapshot: () => ({
++        pending: nodes.length,
++        activeType: activeType || null,
++        activeForMs: activeSince === undefined ? null : Date.now() - activeSince,
++    }) };
+ }
+ //# sourceMappingURL=offline-node-processor.js.map
+\ No newline at end of file
+diff --git a/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js b/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js
+index 3cb615c..5e95b0e 100644
+--- a/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js
++++ b/node_modules/@whiskeysockets/baileys/lib/Utils/signal.js
+@@ -137,27 +137,29 @@ export const parseAndInjectE2ESessions = async (node, repository) => {
+ };
+ export const extractDeviceJids = (result, myJid, myLid, excludeZeroDevices) => {
+     const { user: myUser, device: myDevice } = jidDecode(myJid);
++    const myLidUser = myLid ? jidDecode(myLid)?.user : undefined;
+     const extracted = [];
+     for (const userResult of result) {
+         const { devices, id } = userResult;
+         const decoded = jidDecode(id), { user, server } = decoded;
+-        let { domainType } = decoded;
++        const { domainType } = decoded;
+         const deviceList = devices?.deviceList;
+         if (!Array.isArray(deviceList))
+             continue;
+         for (const { id: device, keyIndex, isHosted } of deviceList) {
++            if (device === 99 && !isHosted && server !== 'hosted' && server !== 'hosted.lid') continue;
+             if ((!excludeZeroDevices || device !== 0) && // if zero devices are not-excluded, or device is non zero
+-                ((myUser !== user && myLid !== user) || myDevice !== device) && // either different user or if me user, not this device
++                ((myUser !== user && myLidUser !== user) || myDevice !== device) && // either different user or if me user, not this device
+                 (device === 0 || !!keyIndex) // ensure that "key-index" is specified for "non-zero" devices, produces a bad req otherwise
+             ) {
+-                if (isHosted) {
+-                    domainType = domainType === WAJIDDomains.LID ? WAJIDDomains.HOSTED_LID : WAJIDDomains.HOSTED;
+-                }
++                const deviceDomain = isHosted
++                    ? (domainType === WAJIDDomains.LID ? WAJIDDomains.HOSTED_LID : WAJIDDomains.HOSTED)
++                    : domainType;
+                 extracted.push({
+                     user,
+                     device,
+-                    domainType,
+-                    server: getServerFromDomainType(server, domainType)
++                    domainType: deviceDomain,
++                    server: getServerFromDomainType(server, deviceDomain)
+                 });
+             }
+         }

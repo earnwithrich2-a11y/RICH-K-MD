@@ -11,6 +11,9 @@ function receiptHandler(context) {
     const start = source.indexOf("const handleReceipt =");
     const end = source.indexOf("const handleNotification =", start);
     return vm.runInNewContext(`${source.slice(start, end)}; handleReceipt`, {
+        ...sdk,
+        getStatusFromReceiptType: () => undefined,
+        updateSendMessageAgainCount: async () => {},
         config: { prioritizeLiveMessages: true }, logger,
         authState: { creds: { me: { id: "15550000001:4@s.whatsapp.net", lid: "99880001:4@lid" } } },
         WABinary_1: sdk, Utils_1: { getStatusFromReceiptType: () => undefined },
@@ -68,17 +71,24 @@ test("missing retry payloads cannot reset recipient sessions or publish any repl
     const end = source.indexOf("const handleReceipt =", start);
     const fail = () => { throw new Error("Missing payload caused a crypto or send operation"); };
     const resend = vm.runInNewContext(`${source.slice(start, end)}; sendMessagesAgain`, {
+        messageRetryManager: undefined,
         getMessage: async () => undefined, assertSessions: fail,
         signalRepository: { injectE2ESession: fail },
         authState: { keys: { set: fail } }, relayMessage: fail,
     });
-    await resend({ remoteJid: "15550000002@s.whatsapp.net" }, ["synthetic"], {}, {});
+    await resend({ remoteJid: "15550000002@s.whatsapp.net" }, ["synthetic"], { attrs: { count: "1" } }, {});
 });
 
 function offlineProcessor(context) {
     const start = source.indexOf("const processNodeWithBuffer =");
-    const end = source.indexOf("// Handles newsletter notifications", start);
+    const end = source.indexOf("// recv a message", start);
     return vm.runInNewContext(`${source.slice(start, end)}; processNode`, {
+        ...sdk,
+        S_WHATSAPP_NET: "@s.whatsapp.net",
+        shouldIgnoreJid: () => false,
+        authState: { creds: { me: { id: "15550000001:4@s.whatsapp.net", lid: "99880001:4@lid" } } },
+        makeOfflineNodeProcessor: require("@whiskeysockets/baileys/lib/Utils/offline-node-processor.js").makeOfflineNodeProcessor,
+        setImmediate,
         config: { prioritizeLiveMessages: true },
         ws: { isOpen: true },
         ev: { buffer() {}, flush() {} },
@@ -95,12 +105,15 @@ const settle = () => new Promise(resolve => setImmediate(resolve));
 
 test("an unavailable message is acknowledged without awaiting phone recovery or entering crypto processing", async () => {
     const start = source.indexOf("const handleMessage =");
-    const end = source.indexOf("const fetchMessageHistory =", start);
+    const end = source.indexOf("const processNodeWithBuffer =", start);
     let release, recovered, acked = 0, requests = 0;
     const waiting = new Promise(resolve => { release = resolve; });
     const entered = new Promise(resolve => { recovered = resolve; });
     const errors = [];
     const handle = vm.runInNewContext(`${source.slice(start, end)}; handleMessage`, {
+        ...sdk,
+        decodeMessageNode: () => ({ fullMessage: { key: { id: "synthetic" } } }),
+        decryptMessageNode: () => { throw new Error("Unavailable packet must not enter crypto"); },
         config: { prioritizeLiveMessages: true },
         WABinary_1: sdk, logger,
         authState: { creds: { me: { id: "15550000001:4@s.whatsapp.net" } } },
@@ -188,7 +201,7 @@ test("failed offline packets do not wedge later messages or release message orde
 test("node buffer ownership is released even if the error reporter throws", async () => {
     let buffers = 0;
     const start = source.indexOf("const processNodeWithBuffer =");
-    const end = source.indexOf("const makeOfflineNodeProcessor =", start);
+    const end = source.indexOf("const offlineNodeProcessor =", start);
     const run = vm.runInNewContext(`${source.slice(start, end)}; processNodeWithBuffer`, {
         ev: { buffer() { buffers++; }, flush() { buffers--; } },
         onUnexpectedError() { throw new Error("Reporter failed"); },

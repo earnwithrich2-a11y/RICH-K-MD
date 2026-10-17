@@ -25,6 +25,13 @@ Run the startup smoke check before publishing or after changing dependencies:
 npm run validate:startup
 ```
 
+The supported upstream Baileys SDK is pinned to the checked-in patch version.
+CommonJS compatibility requires Node 20.19 or newer; the workspace uses Node 20.
+Before reinstalling in Replit, run `npm run lockfile:portable -- --replit`.
+After installation, run the patch installer and `npm run lockfile:portable`,
+then test before committing. Do not publish lockfiles containing Replit-internal
+registry URLs or bypass the package firewall to install withdrawn packages.
+
 This loads the bot's runtime modules, starts the real Express server in a safe
 test mode that does not connect to WhatsApp, and verifies the `/health`
 response.
