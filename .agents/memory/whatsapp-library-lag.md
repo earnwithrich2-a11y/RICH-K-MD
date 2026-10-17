@@ -33,17 +33,23 @@ Diagnostic logging must use an explicit allowlist of fixed event names.
 
 **How to apply:** Retain sanitized retry-stage and bundle-status events without forwarding arbitrary SDK objects or error stacks.
 
-The user requested the transport alias `"@whiskeysockets/baileys": "npm:bungoma"` and approved carrying encryption protections into that transport. Preserve the active login during upgrades; fresh pairing requires separate approval.
+The user approved replacing the unavailable Bungoma fork with supported upstream Baileys while retaining existing session files. Fresh pairing still requires separate approval.
 
-**Why:** Multiple fork patches passed synthetic tests without producing readable phone-side replies. After approving an upstream upgrade, the user requested Bungoma with protections rather than an unprotected package swap.
+**Why:** The earlier Bungoma preference was superseded when its withdrawal blocked clean Heroku installs. Multiple earlier transport patches had passed synthetic tests without readable phone-side replies, so switching packages must retain the established encryption protections rather than discard them.
 
-**How to apply:** Use the requested transport without discarding domain-aware sessions, isolated key transactions, durable-write ordering or live-event protections. Validate the actual selected transport, not a second SDK left installed for tests.
+**How to apply:** Preserve domain-aware sessions, isolated key transactions, durable-write ordering and live-event protections when upgrading supported Baileys. Validate the actual selected transport, not a second SDK left installed for tests.
 
 Check registry availability before assuming the installed transport can be reproduced by a clean install.
 
 **Why:** On 2026-10-17, a clean install could not fetch the locked Bungoma release; registry metadata offered only security-placeholder versions. An already working dependency directory did not prove the package was still available.
 
 **How to apply:** Recheck current registry metadata before reinstalling or deploying this fork. Do not vendor withdrawn package copies or bypass the package firewall. Preserve the active login and obtain approval for a supported replacement, since the user explicitly selected this fork.
+
+A Replit tarball 404 does not always mean the package was withdrawn.
+
+**Why:** npm's registry-host replacement dropped the firewall's `/npm/` path when reusing a publicly portable lockfile. The supported package existed and installed correctly through the full proxy URL.
+
+**How to apply:** Check registry metadata and the failing URL path before diagnosing withdrawal. Keep installation through the package firewall, and normalize only download addresses for external deployment; do not change package versions or integrity hashes to repair a proxy-path error.
 
 Device discovery can list hosted device 99 under an ordinary PN/LID parent. Do not infer a hosted Signal address solely from the device number.
 

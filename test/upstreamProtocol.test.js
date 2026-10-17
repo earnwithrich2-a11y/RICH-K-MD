@@ -38,12 +38,25 @@ function decode(bytes) {
     return sdk.proto.Message.decode(sdk.unpadRandomMax16(Buffer.from(bytes)));
 }
 
-test("legacy plugin imports and the actual socket use the requested bungoma alias", () => {
+test("legacy plugin imports and the actual socket use the supported pinned Baileys SDK", () => {
     const pkg = require("@whiskeysockets/baileys/package.json");
-    assert.equal(pkg.name, "bungoma");
-    assert.equal(pkg.version, "1.1.1");
-    assert.equal(require("../package.json").dependencies["@whiskeysockets/baileys"], "npm:bungoma");
+    assert.equal(pkg.name, "@whiskeysockets/baileys");
+    assert.equal(pkg.version, "7.0.0-rc14");
+    assert.equal(require("../package.json").dependencies["@whiskeysockets/baileys"], "7.0.0-rc14");
     assert.equal(sdk.default, require("@whiskeysockets/baileys").default);
+});
+
+test("upstream ESM socket internals and CommonJS plugins share the protected key transaction implementation", () => {
+    const native = require("@whiskeysockets/baileys/lib/Utils/auth-utils.js");
+    const protectedKeys = require("../RICHK-MD-core/connection/signalKeyTransactions");
+    assert.equal(native.addTransactionCapability, protectedKeys.addTransactionCapability);
+    assert.equal(native.makeCacheableSignalKeyStore, protectedKeys.makeCacheableSignalKeyStore);
+    assert.equal(sdk.makeCacheableSignalKeyStore, protectedKeys.makeCacheableSignalKeyStore);
+    const nativeCurve = require("@whiskeysockets/baileys").Curve;
+    const pair = nativeCurve.generateKeyPair(), data = Buffer.from("native signature control");
+    const signature = nativeCurve.sign(pair.private, data);
+    assert.equal(nativeCurve.verify(pair.public, data, signature), true);
+    assert.equal(nativeCurve.verify(pair.public, Buffer.from("tampered"), signature), false);
 });
 
 test("phone, LID and hosted-device session addresses cannot collide", () => {
