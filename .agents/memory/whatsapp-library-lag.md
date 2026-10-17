@@ -39,6 +39,12 @@ The user requested the transport alias `"@whiskeysockets/baileys": "npm:bungoma"
 
 **How to apply:** Use the requested transport without discarding domain-aware sessions, isolated key transactions, durable-write ordering or live-event protections. Validate the actual selected transport, not a second SDK left installed for tests.
 
+Check registry availability before assuming the installed transport can be reproduced by a clean install.
+
+**Why:** On 2026-10-17, a clean install could not fetch the locked Bungoma release; registry metadata offered only security-placeholder versions. An already working dependency directory did not prove the package was still available.
+
+**How to apply:** Recheck current registry metadata before reinstalling or deploying this fork. Do not vendor withdrawn package copies or bypass the package firewall. Preserve the active login and obtain approval for a supported replacement, since the user explicitly selected this fork.
+
 Device discovery can list hosted device 99 under an ordinary PN/LID parent. Do not infer a hosted Signal address solely from the device number.
 
 **Why:** Live Bungoma resends reached recipient-key preparation but then failed on a non-hosted device-99 target discovered during fan-out. Ordinary phones still need their valid delivery targets; weakening the namespace check is not a safe repair.
