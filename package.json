@@ -5,8 +5,8 @@
   "main": "./index.js",
   "type": "commonjs",
   "engines": {
-    "node": ">=20.x",
-    "npm": ">=10.x"
+    "node": "20.x",
+    "npm": "10.x"
   },
   "scripts": {
     "predev": "node scripts/ensure-transport-patches.js && patch-package --error-on-fail",

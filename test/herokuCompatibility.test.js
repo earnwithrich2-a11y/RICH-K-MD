@@ -6,9 +6,10 @@ const { makePortable } = require("../scripts/portable-lockfile");
 const manifest = require("../package.json");
 const lock = require("../package-lock.json");
 
-test("Heroku engine requirements and peer dependency policy are explicit", () => {
-    assert.deepEqual(manifest.engines, { node: ">=20.x", npm: ">=10.x" });
+test("Heroku major versions, Git allowance and peer dependency policy are explicit", () => {
+    assert.deepEqual(manifest.engines, { node: "20.x", npm: "10.x" });
     const config = fs.readFileSync(path.join(__dirname, "../.npmrc"), "utf8");
+    assert.match(config, /^allow-git=true$/m);
     assert.match(config, /^legacy-peer-deps=true$/m);
     assert.match(config, /^save-exact=true$/m);
 });
