@@ -7,3 +7,4 @@
 - [Signal transaction safety](signal-transaction-safety.md) — isolate async crypto operations and commit keys atomically; never trade encryption-state safety for queue speed.
 - [Group URL lock policy](group-url-lock-policy.md) — only group admins and the group owner are exempt; global bot-owner or sudo status is not enough.
 - [Logo generation availability](logo-generation.md) — basic text logos must work independently of specialty providers; never silently substitute a different named effect.
+- [Repository history safety](repository-history-safety.md) — historical GitHub uploads included private runtime databases; a clean current tree does not remove that exposure.

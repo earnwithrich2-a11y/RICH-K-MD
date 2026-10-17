@@ -4,6 +4,10 @@
   "description": "RICHK-MD, a multi-device WhatsApp bot",
   "main": "./index.js",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20.x",
+    "npm": ">=10.x"
+  },
   "scripts": {
     "predev": "node scripts/ensure-transport-patches.js && patch-package --error-on-fail",
     "dev": "node scripts/run-bot.js",
