@@ -32,6 +32,15 @@ function safeParse(str) {
 
 let _db = null;
 let _stmts = {};
+const memory = new Map();
+const MAX_MEMORY_MESSAGES = 10000;
+
+function remember(jid, message) {
+    const key = `${jid}\0${message.key.id}`;
+    memory.delete(key);
+    memory.set(key, message);
+    while (memory.size > MAX_MEMORY_MESSAGES) memory.delete(memory.keys().next().value);
+}
 
 function getDb() {
     if (_db) return _db;
@@ -98,14 +107,19 @@ function s(sql) {
 
 function saveMsg(jid, message) {
     try {
+        const data = safeStringify(message);
+        // Normalize Uint8Array consistently with the persisted retry payload.
+        remember(jid, safeParse(data));
         getDb();
-        _stmts.saveMsg.run(message.key.id, jid, safeStringify(message));
+        _stmts.saveMsg.run(message.key.id, jid, data);
     } catch (e) {
         console.error('[msgStore] save:', e.message);
     }
 }
 
 function loadMsg(jid, id) {
+    const cached = memory.get(`${jid}\0${id}`);
+    if (cached) return cached;
     try {
         getDb();
         const row = _stmts.loadMsg.get(jid, id);
@@ -191,21 +205,12 @@ class SQLiteStore {
         this.destroy();
         this._eventSource = ev;
         this._handler = ({ messages = [] }) => {
-            const incoming = [];
             for (const msg of messages) {
                 if (!msg.key?.remoteJid || !msg.key?.id) continue;
-                if (msg.key.fromMe) {
-                    this.saveMessage(msg.key.remoteJid, msg);
-                } else {
-                    incoming.push(msg);
-                }
-            }
-            if (incoming.length) {
-                setImmediate(() => {
-                    for (const msg of incoming) {
-                        this.saveMessage(msg.key.remoteJid, msg);
-                    }
-                });
+                // Capture before any asynchronous event handler can see a revoke.
+                // Protocol packets must never overwrite the original payload.
+                if (msg.message?.protocolMessage) continue;
+                this.saveMessage(msg.key.remoteJid, msg);
             }
         };
         ev.on('messages.upsert', this._handler);
@@ -228,4 +233,6 @@ module.exports = {
     removeAntiDelete,
     startCleanup,
     SQLiteStore,
+    safeStringify,
+    safeParse,
 };

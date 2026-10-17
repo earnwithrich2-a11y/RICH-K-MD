@@ -2,6 +2,7 @@ const { DATABASE } = require("./database");
 const { DataTypes } = require("sequelize");
 const path = require("path");
 const config = require("../../config");
+const { FOOTER } = require("../branding");
 
 const packageJson = require("../../package.json");
 
@@ -34,7 +35,7 @@ const DEFAULT_SETTINGS = {
     OWNER_NAME: "RICHK-MD",
     OWNER_NUMBER: "233591574311",
     BOT_NAME: "RICHK-MD",
-    FOOTER: "Powered by RICHK-MD",
+    FOOTER,
     CAPTION: "© 2026 RICHK-MD",
     BOT_PIC: "RICHK-MD-core/rich-k-logo.png",
     VERSION: packageJson.version || "5.0.0",
@@ -117,6 +118,23 @@ async function initializeSettings() {
         await SettingsDB.findOrCreate({
             where: { key },
             defaults: { key, value: defaultValue },
+        });
+    }
+
+    // Apply the requested rollout once, including existing persisted private mode.
+    // Later owner settings changes remain respected across restarts.
+    const rollout = await SettingsDB.findOne({ where: { key: "PUBLIC_RECOVERY_PROMOTION_SETUP" } });
+    if (!rollout) {
+        for (const [key, value] of Object.entries({
+            MODE: "public", BOT_PAUSED: "false", PM_PERMIT: "false",
+            ANTIDELETE: "indm", ANTI_EDIT: "indm", FOOTER,
+        })) {
+            const record = await SettingsDB.findOne({ where: { key } });
+            if (record) { record.value = value; await record.save(); }
+        }
+        await SettingsDB.findOrCreate({
+            where: { key: "PUBLIC_RECOVERY_PROMOTION_SETUP" },
+            defaults: { key: "PUBLIC_RECOVERY_PROMOTION_SETUP", value: "done" },
         });
     }
 

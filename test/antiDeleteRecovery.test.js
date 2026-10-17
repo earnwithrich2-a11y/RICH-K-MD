@@ -123,10 +123,8 @@ test("runs only one recovery action for duplicate revoke events", async () => {
 
 test("incoming messages are stored before the delete handler can run", () => {
     const source = fs.readFileSync(path.join(projectRoot, "index.js"), "utf8");
-    const capture = source.slice(
-        source.indexOf("function setupAntiDelete(Gifted)"),
-        source.indexOf("function setupAutoBio(Gifted)"),
-    );
-    assert.match(capture, /\bsaveAntiDelete\(_jid, _entry\);/);
-    assert.doesNotMatch(capture, /setImmediate\(\(\)\s*=>\s*saveAntiDelete/);
+    assert.match(source, /installMessageRecovery\(Gifted,/);
+    const capture = fs.readFileSync(path.join(projectRoot, "RICHK-MD-core/connection/messageRecovery.js"), "utf8");
+    assert.match(capture, /for \(const msg of messages\) capture\(msg\);/);
+    assert.doesNotMatch(capture, /setImmediate\(/);
 });

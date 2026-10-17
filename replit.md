@@ -12,6 +12,10 @@ npm run dev
 ```
 
 The Express server listens on port `5000`. Its health endpoint is `/health`.
+The development runner supervises unexpected process failures with a bounded
+restart delay. WhatsApp logout/bad-session responses stop reconnection attempts
+without deleting login files; `/health` reports `whatsapp.authRequired` and the
+status page shows that a valid paired session is needed.
 
 ## Pre-publish validation
 
@@ -34,6 +38,24 @@ response.
   database.
 
 Do not commit session data or local database files.
+
+## Message recovery and promotion
+
+Incoming originals are captured synchronously before delete/edit processing.
+Recovery sends to the configured `OWNER_NUMBER`, not necessarily the linked bot
+account. Owner notifications are sent before media download/upload; failed
+deliveries persist and retry. The recovery archive is private local session data:
+seven-day retention, 10,000 hot in-memory messages, 32 MiB per media item and a
+512 MiB media budget. Pending recoveries are preserved rather than evicted.
+Media not received/downloaded before it expires cannot be guaranteed recoverable.
+Use encrypted/private hosting storage and disclose message retention to chat users.
+
+The requested public-mode rollout is applied once to existing settings. Owner-only
+administration and group-admin permissions remain protected. The promotion footer
+is added centrally; audio/stickers receive a separate footer message because
+WhatsApp does not support their captions. Reactions, deletes and protocol control
+packets are not changed. Promotion commands provide instructions, not a live
+balance lookup, payment processing or a guarantee of third-party service availability.
 
 ## Replit compatibility
 

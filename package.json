@@ -6,7 +6,7 @@
   "type": "commonjs",
   "scripts": {
     "predev": "node scripts/ensure-transport-patches.js && patch-package --error-on-fail",
-    "dev": "node index.js",
+    "dev": "node scripts/run-bot.js",
     "test": "node --test test",
     "validate:startup": "node scripts/smoke-startup.js",
     "postinstall": "node scripts/ensure-transport-patches.js && patch-package --error-on-fail",

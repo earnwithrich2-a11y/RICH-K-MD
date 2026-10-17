@@ -64,7 +64,6 @@ const setupConnectionHandler = (
 
         if (connection === "connecting") {
             console.log("🕗 Connecting Bot...");
-            reconnectAttempts = 0;
         }
 
         if (connection === "open") {
@@ -103,21 +102,21 @@ const setupConnectionHandler = (
                     console.log(
                         "WhatsApp rejected the session. Login data is preserved; re-pairing requires approval.",
                     );
-                    process.exit(1);
+                    Gifted.authRequired = true;
                     break;
 
                 case DisconnectReason.connectionReplaced:
                     console.log(
                         "Connection replaced, another new session opened",
                     );
-                    process.exit(1);
+                    Gifted.connectionReplaced = true;
                     break;
 
                 case DisconnectReason.loggedOut:
                     console.log(
                         "WhatsApp reported a logout. Login data is preserved; re-pairing requires approval.",
                     );
-                    process.exit(1);
+                    Gifted.authRequired = true;
                     break;
 
                 case DisconnectReason.connectionClosed:
