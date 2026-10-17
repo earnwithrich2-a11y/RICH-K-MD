@@ -1,0 +1,186 @@
+const { getContentType, normalizeMessageContent, downloadContentFromMessage, downloadMediaMessage } = require('gifted-baileys');
+const { getLidMapping } = require('./groupCache');
+
+const standardizeJid = (jid) => {
+    if (!jid) return '';
+    try {
+        jid = typeof jid === 'string' ? jid : 
+            (jid.decodeJid ? jid.decodeJid() : String(jid));
+        jid = jid.split('/')[0];
+        const at = jid.indexOf('@');
+        const user = (at === -1 ? jid : jid.slice(0, at)).split(':')[0];
+        const server = at === -1 ? 's.whatsapp.net' : jid.slice(at + 1);
+        return `${user}@${server}`.toLowerCase();
+    } catch (e) {
+        console.error('JID standardization error:', e);
+        return '';
+    }
+};
+
+const convertLidToJid = (lid) => {
+    if (!lid) return '';
+    if (!lid.endsWith('@lid')) return lid;
+    const cached = getLidMapping(lid);
+    if (cached) return cached;
+    return lid;
+};
+
+const serializeMessage = async (ms, Gifted, settings = {}) => {
+    if (!ms?.message || !ms?.key) return null;
+
+    const botId = standardizeJid(Gifted.user?.id);
+    // Linked-device copies and disappearing/view-once envelopes contain the
+    // actual text inside another message. Keep the original for quoting/media.
+    const content = normalizeMessageContent(ms.message.deviceSentMessage?.message || ms.message);
+    if (!content) return null;
+    const type = getContentType(content);
+    const ownLid = standardizeJid(Gifted.authState?.creds?.me?.lid || Gifted.user?.lid);
+    const remoteJid = standardizeJid(ms.key.remoteJid);
+    const remoteJidAlt = standardizeJid(ms.key.remoteJidAlt);
+    const isMessageYourself =
+        ms.key.fromMe &&
+        ((botId && remoteJid === botId) ||
+            (remoteJid.endsWith('@lid') &&
+                ((ownLid && remoteJid === ownLid) ||
+                    (botId && remoteJidAlt === botId) ||
+                    (ownLid && remoteJidAlt === ownLid))));
+    const from = isMessageYourself ? botId : remoteJid;
+    const isGroup = from.endsWith('@g.us');
+    
+    const sendr = ms.key.fromMe 
+        ? botId
+        : (ms.key.senderPn || ms.key.participantPn || ms.key.participantAlt || ms.key.remoteJidAlt || ms.key.remoteJid || ms.key.participant);
+    
+    let body = '';
+    let isButtonResponse = false;
+    let buttonId = null;
+    
+    if (content.interactiveResponseMessage) {
+        isButtonResponse = true;
+        try {
+            const paramsJson = content.interactiveResponseMessage.nativeFlowResponseMessage?.paramsJson;
+            if (paramsJson) {
+                buttonId = JSON.parse(paramsJson)?.id || null;
+            }
+        } catch (e) {
+            buttonId = null;
+        }
+        if (!buttonId) {
+            buttonId = content.interactiveResponseMessage.buttonId || null;
+        }
+        body = buttonId || content.interactiveResponseMessage?.body?.text || '';
+    } else if (content.buttonsResponseMessage?.selectedButtonId) {
+        isButtonResponse = true;
+        buttonId = content.buttonsResponseMessage.selectedButtonId;
+        body = buttonId;
+    } else if (content.listResponseMessage?.singleSelectReply?.selectedRowId) {
+        isButtonResponse = true;
+        buttonId = content.listResponseMessage.singleSelectReply.selectedRowId;
+        body = buttonId;
+    } else if (content.templateButtonReplyMessage?.selectedId) {
+        isButtonResponse = true;
+        buttonId = content.templateButtonReplyMessage.selectedId;
+        body = buttonId;
+    } else if (type === 'conversation') {
+        body = content.conversation;
+    } else if (type === 'extendedTextMessage') {
+        body = content.extendedTextMessage.text;
+    } else if (type === 'imageMessage' && content.imageMessage.caption) {
+        body = content.imageMessage.caption;
+    } else if (type === 'videoMessage' && content.videoMessage.caption) {
+        body = content.videoMessage.caption;
+    }
+    body = typeof body === 'string' ? body : '';
+
+    const botPrefix = settings.PREFIX || '.';
+    const isCommand = body.startsWith(botPrefix);
+    const command = isCommand ? body.slice(botPrefix.length).trim().split(' ').shift().toLowerCase() : '';
+    const args = typeof body === 'string' ? body.trim().split(/\s+/).slice(1) : [];
+
+    const repliedMessage = content.extendedTextMessage?.contextInfo?.quotedMessage || null;
+    const quoted = type == 'extendedTextMessage' && 
+        content.extendedTextMessage.contextInfo != null
+        ? content.extendedTextMessage.contextInfo.quotedMessage || []
+        : [];
+    
+    const mentionedJid = (content.extendedTextMessage?.contextInfo?.mentionedJid || []).map(standardizeJid);
+    const tagged = type === 'extendedTextMessage' && content.extendedTextMessage.contextInfo != null
+        ? content.extendedTextMessage.contextInfo.mentionedJid
+        : [];
+    
+    const contextInfo = content.extendedTextMessage?.contextInfo ||
+        content.imageMessage?.contextInfo ||
+        content.videoMessage?.contextInfo ||
+        content.audioMessage?.contextInfo ||
+        content.documentMessage?.contextInfo ||
+        content.stickerMessage?.contextInfo || null;
+    
+    const quotedMsg = contextInfo?.quotedMessage || null;
+    const rawQuotedUser = contextInfo?.participant || contextInfo?.remoteJid;
+    const quotedUser = convertLidToJid(standardizeJid(rawQuotedUser));
+    const repliedMessageAuthor = convertLidToJid(standardizeJid(contextInfo?.participant));
+    
+    const quotedStanzaId = contextInfo?.stanzaId || null;
+    const quotedKey = quotedStanzaId ? {
+        remoteJid: contextInfo?.remoteJid || ms.key.remoteJid || from,
+        fromMe: Boolean(
+            rawQuotedUser &&
+            [botId, ownLid].includes(standardizeJid(rawQuotedUser))
+        ),
+        id: quotedStanzaId,
+        participant: isGroup ? rawQuotedUser : undefined
+    } : null;
+    
+    let messageAuthor = isGroup 
+        ? standardizeJid(ms.key.participant || ms.participant || from)
+        : from;
+    if (ms.key.fromMe) messageAuthor = botId;
+    
+    const user = mentionedJid.length > 0 
+        ? mentionedJid[0] 
+        : repliedMessage 
+            ? repliedMessageAuthor 
+            : '';
+
+    return {
+        ms,
+        mek: ms,
+        type,
+        from,
+        isGroup,
+        sender: sendr,
+        botId,
+        body,
+        isCommand,
+        command,
+        args,
+        q: args.join(' '),
+        pushName:
+            ms.pushName ||
+            ms.verifiedBizName ||
+            ms.notifyName ||
+            ms.key?.pushName ||
+            sendr?.split("@")[0] ||
+            "WhatsApp User",
+        quoted,
+        repliedMessage,
+        mentionedJid,
+        tagged,
+        quotedMsg,
+        quotedKey,
+        quotedUser,
+        repliedMessageAuthor,
+        messageAuthor,
+        user,
+        prefix: botPrefix,
+        isButtonResponse,
+        buttonId
+    };
+};
+
+module.exports = {
+    standardizeJid,
+    convertLidToJid,
+    serializeMessage,
+    downloadMediaMessage
+};
