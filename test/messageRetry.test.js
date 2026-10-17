@@ -106,7 +106,7 @@ test("waits briefly for an outgoing self-chat message that is still being saved"
     assert.equal(attempts, 2);
 });
 
-test("saves outgoing messages before deferring incoming ones and detaches on destroy", async () => {
+test("saves all incoming and outgoing messages immediately and detaches on destroy", async () => {
     const events = new EventEmitter();
     const store = Object.create(SQLiteStore.prototype);
     const saved = [];
@@ -118,7 +118,7 @@ test("saves outgoing messages before deferring incoming ones and detaches on des
             { key: { id: "in", remoteJid: "other@s.whatsapp.net", fromMe: false } },
         ],
     });
-    assert.deepEqual(saved, ["out"]);
+    assert.deepEqual(saved, ["out", "in"]);
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(saved, ["out", "in"]);
     store.destroy();

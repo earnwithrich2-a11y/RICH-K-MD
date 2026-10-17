@@ -54,6 +54,23 @@ async function initialize(settings) {
     await settings.initializeSettings();
 }
 
+test("public rollout updates persisted private mode, recovery and footer once", async () => {
+    const settings = loadSettingsWithMockDatabase();
+    for (const [key, value] of Object.entries({ MODE: "private", ANTIDELETE: "off", ANTI_EDIT: "off", PM_PERMIT: "true" })) {
+        const row = { key, value, save: async () => {} };
+        settings.rows.set(key, row);
+    }
+    await initialize(settings);
+    assert.equal(await settings.getSetting("MODE"), "public");
+    assert.equal(await settings.getSetting("ANTIDELETE"), "indm");
+    assert.equal(await settings.getSetting("ANTI_EDIT"), "indm");
+    assert.equal(await settings.getSetting("PM_PERMIT"), "false");
+    assert.match(await settings.getSetting("FOOTER"), /boosting.richkaurex.site/);
+    await settings.setSetting("MODE", "private");
+    await initialize(settings);
+    assert.equal(await settings.getSetting("MODE"), "private");
+});
+
 test("concurrent reads after cache expiry share one database query", async () => {
     const settings = loadSettingsWithMockDatabase();
     await initialize(settings);
