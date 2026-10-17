@@ -22,6 +22,8 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
             BOT_START_TIME: Date.now(),
             console: { info() {}, warn() {}, error() {} },
             setTimeout() {},
+            runCommandOutput: require("../RICHK-MD-core/branding").runCommandOutput,
+            menuPromo: { maybeSend: async () => false },
             async getAllSettings() {
                 if (++reads === 1 && failFirstSettingsRead) throw new Error("Synthetic read failure");
                 return settings;

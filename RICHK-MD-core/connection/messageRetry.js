@@ -90,4 +90,4 @@ async function findMessageForRetryWithWait(store, key, ownJids, delays = [50, 15
     return result;
 }
 
-module.exports = { findMessageForRetry, findMessageForRetryWithWait };
+module.exports = { findMessageForRetry, findMessageForRetryWithWait, verifiedPrivateAliases };

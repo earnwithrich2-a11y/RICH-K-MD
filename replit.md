@@ -51,10 +51,16 @@ Media not received/downloaded before it expires cannot be guaranteed recoverable
 Use encrypted/private hosting storage and disclose message retention to chat users.
 
 The requested public-mode rollout is applied once to existing settings. Owner-only
-administration and group-admin permissions remain protected. The promotion footer
-is added centrally; audio/stickers receive a separate footer message because
-WhatsApp does not support their captions. Reactions, deletes and protocol control
-packets are not changed. Promotion commands provide instructions, not a live
+administration and group-admin permissions remain protected. Ordinary command
+outputs have no automatic promotional footer, advertising preview or companion
+footer message. Text/media results retain functional data and requested links.
+Only exact outgoing `.menu` and `.settings` commands in another person's private
+chat can send the additional promotion. Normal panels remain in the original
+chat, visible to both people. A shared, durable 12-hour per-person cooldown covers
+both commands and PN/LID aliases; groups, channels, self-chat, incoming commands,
+aliases such as `.help`, and all other commands cannot trigger that promotion.
+Reactions, deletes and protocol control packets are not changed.
+Promotion commands provide instructions, not a live
 balance lookup, payment processing or a guarantee of third-party service availability.
 
 ## Replit compatibility
