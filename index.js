@@ -92,6 +92,7 @@ const { installBranding, runCommandOutput } = require("./RICHK-MD-core/branding"
 const { MenuPromo } = require("./RICHK-MD-core/connection/menuPromo");
 const { RecoveryArchive } = require("./RICHK-MD-core/connection/recoveryArchive");
 const { installMessageRecovery } = require("./RICHK-MD-core/connection/messageRecovery");
+const { sendConnectedGreeting } = require("./RICHK-MD-core/connection/connectedGreeting");
 const config = require("./config");
 const googleTTS = require("google-tts-api");
 const fs = require("fs-extra");
@@ -318,60 +319,12 @@ async function startGifted() {
                 await safeGroupAcceptInvite(Gifted, s.GC_JID);
                 await initializeLidStore(Gifted);
 
-                setTimeout(async () => {
-                    try {
-                        const totalCommands = commands.filter(
-                            (c) => c.pattern && !c.dontAddCommandList,
-                        ).length;
-                        console.log("💜 Connected to Whatsapp, Active!");
-
-                        if (s.STARTING_MESSAGE === "true") {
-                            const d = DEFAULT_SETTINGS;
-                            const md =
-                                s.MODE === "public" ? "public" : "private";
-                            const connectionThumbnail = await sharp(
-                                path.join(__dirname, "RICHK-MD-core", "rich-k-logo.png"),
-                            )
-                                .resize(300, 300, { fit: "cover" })
-                                .jpeg({ quality: 82 })
-                                .toBuffer();
-                            const connectionMsg = `
-*${s.BOT_NAME || d.BOT_NAME} 𝐂𝐎𝐍𝐍𝐄𝐂𝐓𝐄𝐃*
-
-𝐏𝐫𝐞𝐟𝐢𝐱       : *[ ${s.PREFIX || d.PREFIX} ]*
-𝐏𝐥𝐮𝐠𝐢𝐧𝐬      : *${totalCommands}*
-𝐌𝐨𝐝𝐞        : *${md}*
-𝐎𝐰𝐧𝐞𝐫       : *${s.OWNER_NUMBER || d.OWNER_NUMBER}*
-𝐖𝐞𝐛𝐬𝐢𝐭𝐞      : *https://richkaurex.site*
-𝐔𝐩𝐝𝐚𝐭𝐞𝐬      : *${s.NEWSLETTER_URL || d.NEWSLETTER_URL}*
-
-𝐍𝐨𝐭𝐞:  Bot may take some few seconds/minutes to sync before being ready to use.
-
-> *${s.CAPTION || d.CAPTION}*`;
-
-                            await Gifted.sendMessage(
-                                Gifted.user.id,
-                                {
-                                    text: connectionMsg,
-                                    ...(await createContext(
-                                        s.BOT_NAME || d.BOT_NAME,
-                                        {
-                                            title: "BOT INTEGRATED",
-                                            body: "Status: Ready for Use",
-                                            thumbnail: connectionThumbnail,
-                                        },
-                                    )),
-                                },
-                                {
-                                    disappearingMessagesInChat: true,
-                                    ephemeralExpiration: 300,
-                                },
-                            );
-                        }
-                    } catch (err) {
-                        console.error("Post-connection setup error:", err);
-                    }
-                }, 5000);
+                console.log("💜 Connected to Whatsapp, Active!");
+                try {
+                    await sendConnectedGreeting(Gifted);
+                } catch (err) {
+                    console.error("Post-connection greeting failed:", err);
+                }
             },
         });
 

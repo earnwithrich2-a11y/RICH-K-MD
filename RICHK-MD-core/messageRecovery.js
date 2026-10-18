@@ -14,10 +14,41 @@ function textOf(message) {
         message.documentMessage?.caption ?? `[${Object.keys(message).find(key => MEDIA[key]) || "message"}]`;
 }
 function enabled(value) { return !["false", "off", "0"].includes(String(value).toLowerCase()); }
-function ownerJid(settings) {
-    const number = String(settings.OWNER_NUMBER || "").split("@")[0].replace(/\D/g, "");
-    if (!number) throw new Error("Owner number is not configured");
+function connectedUserJid(socket) {
+    const id = socket.user?.id || socket.authState?.creds?.me?.id;
+    const number = String(id || "").split(":")[0].split("@")[0].replace(/\D/g, "");
+    if (!number) throw new Error("Connected WhatsApp user number is unavailable");
     return `${number}@s.whatsapp.net`;
+}
+
+function timestampText(message, fallback) {
+    let timestamp = message?.messageTimestamp ?? fallback;
+    if (timestamp && typeof timestamp.toNumber === "function") timestamp = timestamp.toNumber();
+    else if (timestamp && typeof timestamp === "object" && timestamp.low !== undefined) timestamp = timestamp.low;
+    const value = Number(timestamp);
+    if (!Number.isFinite(value) || value <= 0) return "Unknown";
+    const date = new Date(value > 1e12 ? value : value * 1000);
+    return Number.isNaN(date.getTime()) ? "Unknown" : date.toISOString();
+}
+
+async function senderDetails(socket, original, eventKey) {
+    const key = original?.key || eventKey || {};
+    let jid = key.participantPn || key.senderPn || key.participant ||
+        key.remoteJidAlt || key.remoteJid || "";
+    if (jid.endsWith("@lid")) {
+        try {
+            jid = await socket.signalRepository?.lidMapping?.getPNForLID(jid) || jid;
+        } catch { /* Use the saved LID when a phone mapping is not available. */ }
+    }
+    const number = jid.endsWith("@s.whatsapp.net")
+        ? jid.split("@")[0].split(":")[0].replace(/\D/g, "")
+        : "";
+    const tag = number ? `@${number}` : "";
+    const name = original?.pushName || "";
+    return {
+        mention: number ? `${number}@s.whatsapp.net` : null,
+        display: tag ? `${tag}${name ? ` (${name})` : ""}` : name || jid || "Unknown",
+    };
 }
 
 function installMessageRecovery(socket, { archive, getSettings, download, revokeType = 1, retryMs = 1000, initiallyOnline = false }) {
@@ -52,7 +83,8 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         const originalKey = row?.key || archive.key(key.remoteJid, key.id);
         archive.enqueue({
             key: `${originalKey}\0${kind}\0${fingerprint}`,
-            originalKey, chat: key.remoteJid, id: key.id, kind, edited, alertSent: false,
+            originalKey, chat: key.remoteJid, id: key.id, kind, edited,
+            eventKey: key, timestamp, alertSent: false,
         });
     }
     async function deliver(job) {
@@ -60,20 +92,25 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         const settings = await getSettings();
         const mode = event.kind === "delete" ? settings.ANTIDELETE : settings.ANTI_EDIT;
         if (!enabled(mode)) { archive.complete(job.key); return; }
-        const target = ownerJid(settings);
+        const target = String(mode).toLowerCase() === "inchat"
+            ? event.chat
+            : connectedUserJid(socket);
         const row = archive.find(event.chat, event.id);
         const message = row?.original.message;
         const label = event.kind === "delete" ? "DELETED MESSAGE" : "EDITED MESSAGE";
-        const sender = row?.original.key.participantPn || row?.original.key.participant ||
-            row?.original.key.remoteJid || "Unknown";
+        const sender = await senderDetails(socket, row?.original, event.eventKey);
         const alert = `*RICH-K-MD • ${label}*\n\n` +
-            `Chat: ${event.chat}\nSender: ${row?.original.pushName || sender}\n` +
+            `Chat: ${event.chat}\nSender: ${sender.display}\n` +
+            `Timestamp: ${timestampText(row?.original, event.timestamp)}\n` +
             `Original: ${textOf(message)}` +
             (event.kind === "edit" ? `\nEdited to: ${textOf(event.edited)}` : "") +
             (!row ? "\nThe original was not received or is outside the recovery retention window." : "");
         if (!event.alertSent) {
             // Notify immediately, before slow media download/upload or metadata lookups.
-            await socket.sendMessage(target, { text: alert });
+            await socket.sendMessage(target, {
+                text: alert,
+                ...(sender.mention ? { mentions: [sender.mention] } : {}),
+            });
             event.alertSent = true;
             archive.db.prepare("UPDATE deliveries SET data = ? WHERE key = ?")
                 .run(safeStringify(event), job.key);
@@ -137,7 +174,9 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
     const update = (updates = []) => {
         try {
             for (const entry of updates) {
-                if (entry.update?.messageStubType === revokeType) queue("delete", entry.key);
+                if (entry.update?.messageStubType === revokeType) {
+                    queue("delete", entry.key, undefined, entry.update.messageTimestamp);
+                }
                 else if (entry.update?.message) {
                     const message = unwrap(entry.update.message);
                     const protocol = message?.protocolMessage;
@@ -170,4 +209,4 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
     return { flush, destroy };
 }
 
-module.exports = { installMessageRecovery, textOf, ownerJid };
+module.exports = { installMessageRecovery, textOf, connectedUserJid, timestampText };

@@ -58,6 +58,7 @@ const setupConnectionHandler = (
     callbacks = {},
 ) => {
     setupGroupCacheListeners(Gifted);
+    let isOpen = false;
 
     Gifted.ev.on("connection.update", async (update) => {
         const { connection, lastDisconnect } = update;
@@ -67,6 +68,8 @@ const setupConnectionHandler = (
         }
 
         if (connection === "open") {
+            if (isOpen) return;
+            isOpen = true;
             console.log("✅ Connection Instance is Online");
             reconnectAttempts = 0;
 
@@ -76,6 +79,7 @@ const setupConnectionHandler = (
         }
 
         if (connection === "close") {
+            isOpen = false;
             const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
             console.log(`Connection closed due to: ${reason}`);
 
