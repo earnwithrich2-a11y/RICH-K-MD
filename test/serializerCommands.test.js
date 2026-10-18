@@ -24,6 +24,45 @@ test("actual phone and LID self-chat identities retain their routing", async () 
   }
 });
 
+test("own status/notes commands route privately, while another person's status is ignored", async () => {
+  for (const key of [
+    { fromMe: true },
+    { fromMe: false, participant: "synthetic-own@lid" },
+  ]) {
+    const result = await serializeMessage({
+      key: { remoteJid: "status@broadcast", ...key }, message: { conversation: ".ping" },
+    }, bot);
+    assert.equal(result.from, "synthetic-bot@s.whatsapp.net");
+    assert.equal(result.sender, "synthetic-bot@s.whatsapp.net");
+    assert.equal(result.isCommand, true);
+  }
+  assert.equal(await serializeMessage({
+    key: { remoteJid: "status@broadcast", participant: "synthetic-friend@s.whatsapp.net", fromMe: false },
+    message: { conversation: ".ping" },
+  }, bot), null);
+});
+
+test("incoming group sender identity is the participant, not the group JID", async () => {
+  const result = await serializeMessage({
+    key: { remoteJid: "synthetic-group@g.us", participant: "synthetic-friend@s.whatsapp.net", fromMe: false },
+    message: { conversation: ".ping" },
+  }, bot);
+  assert.equal(result.sender, "synthetic-friend@s.whatsapp.net");
+  assert.equal(result.from, "synthetic-group@g.us");
+});
+
+test("verified native LID mappings resolve the incoming owner's phone identity", async () => {
+  const result = await serializeMessage({
+    key: { remoteJid: "synthetic-friend@lid", fromMe: false },
+    message: { conversation: ".ping" },
+  }, {
+    ...bot,
+    signalRepository: { lidMapping: { getPNForLID: async () => "15550000002@s.whatsapp.net" } },
+  });
+  assert.equal(result.sender, "15550000002@s.whatsapp.net");
+  assert.equal(result.from, "synthetic-friend@lid");
+});
+
 test("disappearing commands preserve quotes, mentions and the original message", async () => {
   const original = {
     key: { remoteJid: "synthetic-friend@s.whatsapp.net", fromMe: true },

@@ -4,6 +4,7 @@ require("./RICHK-MD-core/gmdHelpers");
 const smokeTestMode = process.env.BOT_SMOKE_TEST === "1";
 const { canShowCurrentChannelJid } = require("./RICHK-MD-core/connection/channelJid");
 const { attachCommandDiagnostics } = require("./RICHK-MD-core/connection/commandDiagnostics");
+const { installAutomatedMessageGuard } = require("./RICHK-MD-core/connection/automatedMessageGuard");
 
 const {
     default: giftedConnect,
@@ -611,9 +612,11 @@ const processedMessages = new Set();
 const BOT_START_TIME = Date.now();
 
 function setupCommandHandler(Gifted) {
+    const isAutomatedMessage = installAutomatedMessageGuard(Gifted);
     const handleMessage = async (ms, type) => {
         Gifted.commandDiagnostics?.mark("handlerEntries");
         if (!ms?.key) return;
+        if (isAutomatedMessage(ms)) return;
         if (!ms.message) {
             if (ms.messageStubType !== undefined) {
                 console.warn(
@@ -622,11 +625,6 @@ function setupCommandHandler(Gifted) {
             }
             return;
         }
-        if (type === "append" && !ms.key.fromMe) {
-            Gifted.commandDiagnostics?.mark("historicalSkipped");
-            return;
-        }
-
         const messageId = ms.key.id;
         if (processedMessages.has(messageId)) {
             Gifted.commandDiagnostics?.mark("duplicatesSkipped");
@@ -646,7 +644,7 @@ function setupCommandHandler(Gifted) {
         Gifted.commandDiagnostics?.mark("settingsStarted");
         const settings = await getAllSettings();
         Gifted.commandDiagnostics?.mark("settingsLoaded");
-        const botId = standardizeJid(Gifted.user?.id);
+        const botId = standardizeJid(Gifted.user?.id || Gifted.authState?.creds?.me?.id);
 
         const serialized = await serializeMessage(ms, Gifted, settings);
         Gifted.commandDiagnostics?.mark("serialized");
@@ -671,6 +669,19 @@ function setupCommandHandler(Gifted) {
             quotedKey,
             quotedUser,
         } = serialized;
+
+        const ownerJid = settings.OWNER_NUMBER
+            ? standardizeJid(String(settings.OWNER_NUMBER).replace(/\D/g, ""))
+            : "";
+        const isOwnerMessage = Boolean(ownerJid) && rawSender === ownerJid;
+        const isOwnMessage = ms.key.fromMe === true || (Boolean(botId) && rawSender === botId);
+        if (type === "append" && !isOwnMessage && !isOwnerMessage) {
+            Gifted.commandDiagnostics?.mark("historicalSkipped");
+            return;
+        }
+        // Keep registered incoming text/button workflows, but never interpret
+        // unprefixed outgoing chatter or replies as commands.
+        if (isOwnMessage && !isCommand) return;
 
         const gmd = isCommand && command ? findCommand(command) : null;
         if (isCommand) {
@@ -720,7 +731,7 @@ function setupCommandHandler(Gifted) {
             sender,
         } = groupData;
 
-        const isSuperUser = superUser.includes(sender);
+        const isSuperUser = isOwnMessage || isOwnerMessage || superUser.includes(sender);
         const botPaused =
             String(settings.BOT_PAUSED || "false").toLowerCase() === "true";
         const isOwnerPauseCommand =
