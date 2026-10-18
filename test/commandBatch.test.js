@@ -115,6 +115,29 @@ test("human own-account commands execute in self-chat, peer chats and groups in 
     }
 });
 
+test("fromMe commands marked by Baileys reach self-chat and device-suffixed peer chats", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        realSerializer: true, mode: "private",
+    });
+    const routes = [
+        [".menu", "synthetic-bot:9@s.whatsapp.net", "synthetic-bot@s.whatsapp.net"],
+        [".ping", "synthetic-friend:12@s.whatsapp.net", "synthetic-friend@s.whatsapp.net"],
+        [".settings", "synthetic-bot@s.whatsapp.net", "synthetic-bot@s.whatsapp.net"],
+        [".alive", "synthetic-friend@s.whatsapp.net", "synthetic-friend@s.whatsapp.net"],
+    ];
+
+    for (const [index, [body, remoteJid]] of routes.entries()) {
+        const ms = message(`self-command-${index}`, body);
+        ms.key.remoteJid = remoteJid;
+        ms.key.fromMe = true;
+        ms.isBaileys = true;
+        await f.receive({ messages: [ms], type: "notify" });
+    }
+
+    assert.deepEqual(f.calls, routes.map((_, index) => `self-command-${index}`));
+    assert.deepEqual(f.replies.map(reply => reply.from), routes.map(([, , destination]) => destination));
+});
+
 test("incoming owner commands delivered as fresh append events are allowed in private mode", async () => {
     const f = dispatcherHarness(false, new EventEmitter(), {
         realSerializer: true, mode: "private", ownerNumber: "15550000002",
@@ -192,10 +215,13 @@ test("explicit automated messages and unprefixed own chatter never execute comma
     const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true });
     await f.receive({
         type: "notify",
-        messages: [{ ...message("flagged-bot"), isBaileys: true }, message("plain-own", "hello")],
+        messages: [
+            { ...message("flagged-self-command", ".menu"), isBaileys: true },
+            { ...message("plain-own", "hello"), isBaileys: true },
+        ],
     });
-    assert.equal(f.calls.length, 0);
-    assert.equal(f.replies.length, 0);
+    assert.deepEqual(f.calls, ["flagged-self-command"]);
+    assert.equal(f.replies.length, 1);
 });
 
 test("each command in a buffered message batch reaches its handler", async () => {

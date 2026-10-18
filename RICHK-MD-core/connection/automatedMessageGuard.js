@@ -25,8 +25,9 @@ function installAutomatedMessageGuard(socket, maxRemembered = 20000) {
         remember(sent?.key?.id);
         return sent;
     };
-    const isAutomated = (message) => message?.isBaileys === true ||
-        (message?.key?.fromMe === true && automatedIds.has(message.key.id));
+    const isAutomated = (message) =>
+        (message?.key?.fromMe === true && automatedIds.has(message.key.id)) ||
+        (message?.isBaileys === true && message?.key?.fromMe !== true);
     guards.set(socket, isAutomated);
     return isAutomated;
 }

@@ -24,6 +24,8 @@ test("automated IDs are known before native send resolves, without losing send o
     assert.equal(check({ key: { id: "3EB0-human", fromMe: true } }), false);
     assert.equal(check({ key: { id: "explicit-send", fromMe: false } }), false);
     assert.equal(check({ isBaileys: true }), true);
+    assert.equal(check({ key: { id: "BAE5-self-command", fromMe: true }, isBaileys: true }), false);
+    assert.equal(check({ key: { id: "explicit-send", fromMe: true }, isBaileys: true }), true);
 });
 
 test("remembered IDs are bounded and isolated per socket", async () => {
