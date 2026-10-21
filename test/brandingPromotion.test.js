@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { FOOTER, cleanContent, installBranding, runCommandOutput } = require("../RICHK-MD-core/branding");
+const { premiumText } = require("../RICHK-MD-core/connection/commandRuntime");
 const { EventEmitter } = require("events");
 const { restartDelay, supervise } = require("../scripts/run-bot");
 
@@ -22,7 +23,7 @@ test("regular results lose promotional footers and menus, without modifying cach
         });
     });
     assert.deepEqual([sends[0].text, sends[1].text, sends[2].caption, sends[3].forward.message.conversation],
-        ["hello", "hello", "caption", "original"]);
+        [premiumText("hello"), premiumText("hello"), premiumText("caption"), "original"]);
     assert.equal(source.message.conversation, `original\n${FOOTER}`);
     assert.equal(relays[0].viewOnceMessage.message.interactiveMessage.footer, undefined);
 });

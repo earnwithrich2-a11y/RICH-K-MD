@@ -76,6 +76,7 @@ const DEFAULT_SETTINGS = {
 
 let initialized = false;
 let allSettingsCache = null;
+let commandSettingsSnapshot = null;
 let allSettingsCacheExpiresAt = 0;
 let allSettingsCacheRevision = 0;
 let allSettingsReadInFlight = null;
@@ -167,6 +168,9 @@ async function setSetting(key, value) {
     }
 
     invalidateAllSettingsCache();
+    if (commandSettingsSnapshot) {
+        commandSettingsSnapshot = { ...commandSettingsSnapshot, [key]: value };
+    }
     return true;
 }
 
@@ -200,6 +204,7 @@ async function getAllSettings() {
             // A write may have invalidated this read while the query was pending.
             if (allSettingsCacheRevision === revision) {
                 allSettingsCache = settings;
+                commandSettingsSnapshot = { ...settings };
                 allSettingsCacheExpiresAt = Date.now() + ALL_SETTINGS_CACHE_TTL_MS;
             }
             return settings;
@@ -227,6 +232,17 @@ async function resetSetting(key) {
     return null;
 }
 
+// Startup warms this snapshot. Command dispatch never waits on database I/O.
+// Successful local writes update it before returning; expired reads refresh it
+// in the background and cannot overwrite a newer write (revision check above).
+function getCommandSettings() {
+    if (!commandSettingsSnapshot) throw new Error("Command settings are not initialized");
+    if (Date.now() >= allSettingsCacheExpiresAt) {
+        void getAllSettings().catch(() => console.warn("[Settings] Background refresh unavailable."));
+    }
+    return { ...commandSettingsSnapshot };
+}
+
 async function resetAllSettings() {
     if (!initialized) await initializeSettings();
 
@@ -243,6 +259,7 @@ module.exports = {
     getSetting,
     setSetting,
     getAllSettings,
+    getCommandSettings,
     resetSetting,
     resetAllSettings,
 };

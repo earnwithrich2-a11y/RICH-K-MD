@@ -1,0 +1,11 @@
+node_modules
+.git
+.env
+.env.*
+!.env.example
+RICHK-MD-core/session
+RICHK-MD-core/database/*.db*
+**/sessions
+*.log
+temp_media.mp4
+attached_assets

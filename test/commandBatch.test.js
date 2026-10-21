@@ -8,13 +8,14 @@ const { makeEventBuffer } = require("gifted-baileys/lib/Utils/event-buffer");
 const { serializeMessage, standardizeJid } = require("../RICHK-MD-core/connection/serializer");
 
 function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(), {
-    realSerializer = false, mode = "public", ownerNumber = "", echoReplies = false,
+    realSerializer = false, mode = "public", ownerNumber = "", echoReplies = false, beforeReply,
 } = {}) {
     const source = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
     const start = source.indexOf("function setupCommandHandler(");
     const end = source.indexOf("function setupGiftedHelpers(", start);
     const calls = [];
     const replies = [];
+    const reactions = [];
     let reads = 0;
     const settings = { PREFIX: ".", MODE: mode, BOT_PAUSED: "false", OWNER_NUMBER: ownerNumber };
     const setup = vm.runInNewContext(
@@ -24,10 +25,14 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
             processedMessages: new Set(),
             BOT_START_TIME: Date.now(),
             console: { info() {}, warn() {}, error() {} },
+            performance,
+            extractMessageText: require("../RICHK-MD-core/connection/serializer").extractMessageText,
+            ...require("../RICHK-MD-core/connection/commandRuntime"),
+            getCachedSudoNumbers: () => [],
             setTimeout() {},
             runCommandOutput: require("../RICHK-MD-core/branding").runCommandOutput,
             menuPromo: { maybeSend: async () => false },
-            async getAllSettings() {
+            getCommandSettings() {
                 if (++reads === 1 && failFirstSettingsRead) throw new Error("Synthetic read failure");
                 return settings;
             },
@@ -49,6 +54,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
                 pattern,
                 async function(from, socket, context) {
                     calls.push(context.fixtureId);
+                    if (beforeReply) await beforeReply(context);
                     await socket.sendMessage(from, { text: `reply:${context.fixtureId}` });
                 },
             }),
@@ -65,6 +71,10 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
     const socket = {
         user: { id: realSerializer ? "synthetic-bot:7@s.whatsapp.net" : "synthetic-bot" }, ev,
         sendMessage: async (from, payload, options) => {
+            if (payload.react) {
+                reactions.push({ from, payload });
+                return { key: { id: options?.messageId, fromMe: true, remoteJid: from } };
+            }
             replies.push({ from, payload });
             const sent = {
                 key: { remoteJid: from, fromMe: true, id: options?.messageId },
@@ -82,6 +92,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
     return {
         calls,
         replies,
+        reactions,
         receive: ev instanceof EventEmitter ? socket.ev.listeners("messages.upsert")[0] : undefined,
         socket,
     };
@@ -151,6 +162,52 @@ test("incoming owner commands delivered as fresh append events are allowed in pr
     Object.assign(stranger.key, { fromMe: false, remoteJid: "15550000003@s.whatsapp.net" });
     await f.receive({ messages: [stranger], type: "notify" });
     assert.equal(f.calls.length, 1);
+});
+
+test("a slow command in a batch cannot delay another command or its instant reaction", async () => {
+    let release;
+    const slow = new Promise(resolve => { release = resolve; });
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        beforeReply: context => context.fixtureId === "slow" ? slow : undefined,
+    });
+    const processing = f.receive({
+        type: "notify", messages: [message("slow"), message("fast")],
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.calls, ["slow", "fast"]);
+    assert.deepEqual(f.replies.map(reply => reply.payload.text), ["reply:fast"]);
+    assert.equal(f.reactions.length, 2);
+    assert.ok(f.reactions.every(reaction => reaction.payload.react.text === "⚡"));
+    release();
+    await processing;
+    assert.equal(f.replies.length, 2);
+});
+
+test("prefix feedback happens before a slow LID sender lookup", async () => {
+    let finishMapping;
+    const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true });
+    f.socket.signalRepository = {
+        lidMapping: { getPNForLID: () => new Promise(resolve => { finishMapping = resolve; }) },
+    };
+    const ms = message("slow-mapping");
+    Object.assign(ms.key, { fromMe: false, remoteJid: "friend@lid" });
+    const processing = f.receive({ type: "notify", messages: [ms] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.reactions.length, 1);
+    assert.equal(f.calls.length, 0);
+    finishMapping("15550000002@s.whatsapp.net");
+    await processing;
+    assert.deepEqual(f.calls, ["slow-mapping"]);
+});
+
+test("a failed command returns a polished notice without exposing provider error details", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        beforeReply: () => { throw new Error("provider-secret-internal-details"); },
+    });
+    await f.receive({ type: "notify", messages: [message("failure")] });
+    assert.equal(f.replies.length, 1);
+    assert.match(f.replies[0].payload.text, /Service momentarily unavailable/);
+    assert.doesNotMatch(f.replies[0].payload.text, /provider-secret/);
 });
 
 test("owner LID commands require a verified phone mapping and self-chat works without fromMe", async () => {

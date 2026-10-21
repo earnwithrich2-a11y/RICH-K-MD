@@ -4,16 +4,18 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         ffmpeg \
         ca-certificates \
-        curl && \
+        curl \
+        git \
+        python3 \
+        make \
+        g++ && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package*.json ./
-
-RUN npm install --omit=dev
-
 COPY . .
+
+RUN npm ci --omit=dev
 
 EXPOSE 5000
 

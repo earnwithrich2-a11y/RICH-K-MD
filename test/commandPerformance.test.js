@@ -39,10 +39,10 @@ test("dispatcher reactions do not block command execution", () => {
     );
 
     assert.match(reactionHelper, /void\s+Gifted\.sendMessage\s*\(/);
-    assert.match(reactionHelper, /sendMessage\(ms\.key\.remoteJid\s*\|\|\s*from/);
+    assert.match(reactionHelper, /sendMessage\(ms\.key\.remoteJid/);
     assert.doesNotMatch(reactionHelper, /\bawait\b/);
     assert.doesNotMatch(handler, /await\s+startCommandReaction\s*\(/);
-    assert.match(handler, /await\s+runCommandOutput\(command,\s*settings,\s*\(\)\s*=>\s*gmd\.function\(/);
+    assert.match(handler, /runCommandOutput\(command,\s*settings,\s*\(\)\s*=>\s*gmd\.function\(/);
 });
 
 test("group and owner lookups remain concurrent", () => {

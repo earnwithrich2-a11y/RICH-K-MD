@@ -7,7 +7,7 @@ const manifest = require("../package.json");
 const lock = require("../package-lock.json");
 
 test("Heroku major versions, Git allowance and peer dependency policy are explicit", () => {
-    assert.deepEqual(manifest.engines, { node: "20.x", npm: "10.x" });
+    assert.deepEqual(manifest.engines, { node: ">=20.x <22.x", npm: ">=10.x" });
     const config = fs.readFileSync(path.join(__dirname, "../.npmrc"), "utf8");
     assert.match(config, /^allow-git=true$/m);
     assert.match(config, /^legacy-peer-deps=true$/m);
@@ -20,11 +20,24 @@ test("portable lock agrees with package.json and pins the supported patched SDK"
     assert.equal(manifest.dependencies["@whiskeysockets/baileys"], "7.0.0-rc14");
     assert.equal(lock.packages["node_modules/@whiskeysockets/baileys"].version, "7.0.0-rc14");
     assert.equal(require("@whiskeysockets/baileys/package.json").name, "@whiskeysockets/baileys");
+    for (const [name, version] of Object.entries(manifest.dependencies)) {
+        assert.match(version, /^(?:\d+\.\d+\.\d+(?:-[\w.-]+)?|file:)/, `${name} must be pinned`);
+        if (!version.startsWith("file:")) assert.equal(lock.packages[`node_modules/${name}`].version, version);
+    }
     for (const [name, entry] of Object.entries(lock.packages)) {
         assert.ok(!entry.resolved?.includes(".internal"), `${name} must be installable outside Replit`);
     }
 });
 
+test("worker deployment and Docker install use the real entry and copied local packages", () => {
+    const root = path.join(__dirname, "..");
+    assert.match(fs.readFileSync(path.join(root, "Procfile"), "utf8"), /^worker: node index\.js$/m);
+    assert.deepEqual(require("../app.json").formation, { worker: { quantity: 1, size: "basic" } });
+    const docker = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
+    assert.ok(docker.indexOf("COPY . .") < docker.indexOf("RUN npm ci --omit=dev"));
+    assert.match(fs.readFileSync(path.join(root, ".dockerignore"), "utf8"), /RICHK-MD-core\/session/);
+    assert.equal(manifest.scripts.start, "node index.js");
+});
 test("registry normalization preserves package versions, integrity hashes and unrelated URLs", () => {
     const proxy = {
         version: "1.2.3", integrity: "sha512-test",
