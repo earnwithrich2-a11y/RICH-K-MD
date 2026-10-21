@@ -2,7 +2,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const { evt, commands } = require('../gmdCmds');
 const { standardizeJid } = require('./serializer');
-const { getGroupMetadata, getLidMapping } = require('./groupCache');
+const { getGroupMetadata, getLidMapping, groupCache } = require('./groupCache');
 
 const _compileAsJs = function (module, filename) {
     const content = fs.readFileSync(filename, 'utf8');
@@ -114,7 +114,7 @@ const createHelpers = (Gifted, ms, from) => {
     return { reply, react, edit, del };
 };
 
-const getGroupInfo = async (Gifted, from, botId, sender) => {
+const getGroupInfo = async (Gifted, from, botId, sender, { allowFetch = true } = {}) => {
     const isGroup = from.endsWith('@g.us');
     if (!isGroup) {
         return {
@@ -131,15 +131,19 @@ const getGroupInfo = async (Gifted, from, botId, sender) => {
     }
 
     let groupInfo = null;
+    let metadataTimer;
     try {
         groupInfo = await Promise.race([
-            getGroupMetadata(Gifted, from),
-            new Promise((resolve) =>
-                setTimeout(() => resolve(null), GROUP_METADATA_TIMEOUT_MS),
-            ),
+            allowFetch ? getGroupMetadata(Gifted, from) : Promise.resolve(groupCache.get(from) || null),
+            new Promise((resolve) => {
+                metadataTimer = setTimeout(() => resolve(null), GROUP_METADATA_TIMEOUT_MS);
+                metadataTimer.unref?.();
+            }),
         ]);
     } catch (error) {
         console.error(`Group metadata lookup failed for ${from}:`, error.message);
+    } finally {
+        clearTimeout(metadataTimer);
     }
     if (!groupInfo || !groupInfo.participants) {
         return {

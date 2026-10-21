@@ -1,4 +1,5 @@
 const { AsyncLocalStorage } = require("node:async_hooks");
+const { premiumContent } = require("./connection/commandRuntime");
 
 // Kept for settings compatibility. It is never automatically appended.
 const FOOTER = "⚡ Powered by https://boosting.richkaurex.site 📢 WhatsApp Channel: https://whatsapp.com/channel/0029VbE9wUJ0Vyc8uRaMNM21";
@@ -64,7 +65,8 @@ function installBranding(socket) {
     const send = socket.sendMessage.bind(socket);
     socket.sendMessage = (jid, content, options) => {
         const policy = outputContext.getStore();
-        return send(jid, policy?.clean ? cleanContent(content, policy) : content, options);
+        const cleaned = policy?.clean ? cleanContent(content, policy) : content;
+        return send(jid, policy ? premiumContent(cleaned) : cleaned, options);
     };
     const relay = socket.relayMessage.bind(socket);
     socket.relayMessage = (jid, message, options) => {

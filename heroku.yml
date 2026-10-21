@@ -5,7 +5,7 @@ setup:
 
 build:
   docker:
-    web: Dockerfile
+    worker: Dockerfile
 
 run:
-  web: npm start
+  worker: node index.js

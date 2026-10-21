@@ -1,5 +1,6 @@
 const { gmd } = require("../RICHK-MD-core");
 const axios = require("axios");
+const { serviceUnavailable } = require("../RICHK-MD-core/connection/commandRuntime");
 
 async function queryAI(endpoint, query, conText) {
   const { reply, GiftedTechApi, GiftedApiKey } = conText;
@@ -13,13 +14,13 @@ async function queryAI(endpoint, query, conText) {
     const res = await axios.get(apiUrl, { timeout: 100000 });
 
     if (!res.data?.success || !res.data?.result) {
-      return reply("Failed to get a response. Try again.");
+      return reply(serviceUnavailable());
     }
 
-    reply(res.data.result);
+    return await reply(res.data.result);
   } catch (err) {
-    console.error(`AI ${endpoint} error:`, err.message);
-    reply("Error: " + err.message);
+    console.warn("[AI] Service temporarily unavailable.");
+    return reply(serviceUnavailable());
   }
 }
 

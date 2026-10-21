@@ -48,7 +48,7 @@
     { "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest" }
   ],
   "formation": {
-    "web": {
+    "worker": {
       "quantity": 1,
       "size": "basic"
     }

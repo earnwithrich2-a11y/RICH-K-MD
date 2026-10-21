@@ -158,3 +158,32 @@ test("a read already in flight cannot repopulate cache after a write", async () 
     assert.equal((await settings.getAllSettings()).PREFIX, "!");
     assert.equal(queryCount, 2);
 });
+
+test("command snapshots do not wait on expired database reads and local permission/prefix writes take effect immediately", async () => {
+    const settings = loadSettingsWithMockDatabase();
+    await initialize(settings);
+    const originalNow = Date.now;
+    let now = 1000;
+    Date.now = () => now;
+    try {
+        await settings.getAllSettings();
+        let finish;
+        let reads = 0;
+        settings.model.findAll = () => {
+            reads++;
+            if (reads > 1) return Promise.resolve([...settings.rows.values()]);
+            return new Promise(resolve => { finish = resolve; });
+        };
+        now += 1001;
+        assert.equal(settings.getCommandSettings().PREFIX, ".");
+        assert.equal(settings.getCommandSettings().MODE, "public");
+        assert.equal(reads, 1);
+        await settings.setSetting("PREFIX", "!");
+        await settings.setSetting("MODE", "private");
+        assert.equal(settings.getCommandSettings().PREFIX, "!");
+        assert.equal(settings.getCommandSettings().MODE, "private");
+        finish([{ key: "PREFIX", value: "." }, { key: "MODE", value: "public" }]);
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(settings.getCommandSettings().MODE, "private");
+    } finally { Date.now = originalNow; }
+});

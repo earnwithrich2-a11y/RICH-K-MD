@@ -25,6 +25,23 @@ const convertLidToJid = (lid) => {
     return lid;
 };
 
+function extractMessageText(ms) {
+    const content = normalizeMessageContent(ms?.message?.deviceSentMessage?.message || ms?.message);
+    if (!content) return '';
+    const interactive = content.interactiveResponseMessage;
+    let buttonId;
+    try {
+        buttonId = JSON.parse(interactive?.nativeFlowResponseMessage?.paramsJson || '{}').id;
+    } catch { /* A malformed button still may contain ordinary text. */ }
+    const text = buttonId || interactive?.buttonId || interactive?.body?.text ||
+        content.buttonsResponseMessage?.selectedButtonId ||
+        content.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        content.templateButtonReplyMessage?.selectedId ||
+        content.conversation || content.extendedTextMessage?.text ||
+        content.imageMessage?.caption || content.videoMessage?.caption || '';
+    return typeof text === 'string' ? text : '';
+}
+
 const serializeMessage = async (ms, Gifted, settings = {}) => {
     if (!ms?.message || !ms?.key) return null;
 
@@ -198,6 +215,7 @@ const serializeMessage = async (ms, Gifted, settings = {}) => {
 };
 
 module.exports = {
+    extractMessageText,
     standardizeJid,
     convertLidToJid,
     serializeMessage,
