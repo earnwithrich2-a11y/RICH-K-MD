@@ -209,6 +209,44 @@ test("incoming owner commands delivered as fresh append events are allowed in pr
     assert.equal(f.calls.length, 1);
 });
 
+test("fresh public DM append commands from other users reply in the originating phone or LID chat", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true, mode: "public" });
+    for (const [id, remoteJid] of [
+        ["public-phone-append", "15550000003@s.whatsapp.net"],
+        ["public-lid-append", "synthetic-peer@lid"],
+    ]) {
+        const ms = message(id);
+        Object.assign(ms.key, { fromMe: false, remoteJid });
+        ms.messageTimestamp = { toNumber: () => Math.floor(Date.now() / 1000) };
+        await f.receive({ messages: [ms], type: "append" });
+    }
+    assert.deepEqual(f.calls, ["public-phone-append", "public-lid-append"]);
+    assert.deepEqual(f.replies.map(reply => reply.from), [
+        "15550000003@s.whatsapp.net", "synthetic-peer@lid",
+    ]);
+});
+
+test("fresh incoming append events never bypass private mode; undated, old and future public history stays ignored", async () => {
+    const restricted = dispatcherHarness(false, new EventEmitter(), { realSerializer: true, mode: "private" });
+    const fresh = message("private-peer-append");
+    Object.assign(fresh.key, { fromMe: false, remoteJid: "15550000003@s.whatsapp.net" });
+    await restricted.receive({ messages: [fresh], type: "append" });
+    assert.equal(restricted.calls.length, 0);
+
+    const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true, mode: "public" });
+    for (const [id, timestamp] of [
+        ["undated-peer-append", undefined],
+        ["old-peer-append", Math.floor(Date.now() / 1000) - 300],
+        ["future-peer-append", Math.floor(Date.now() / 1000) + 120],
+    ]) {
+        const ms = message(id);
+        Object.assign(ms.key, { fromMe: false, remoteJid: "15550000003@s.whatsapp.net" });
+        ms.messageTimestamp = timestamp;
+        await f.receive({ messages: [ms], type: "append" });
+    }
+    assert.equal(f.calls.length, 0);
+});
+
 test("a slow command in a batch cannot delay another command or its instant reaction", async () => {
     let release;
     const slow = new Promise(resolve => { release = resolve; });
