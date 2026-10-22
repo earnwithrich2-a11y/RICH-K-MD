@@ -596,8 +596,11 @@ function setupCommandHandler(Gifted) {
 
         setTimeout(() => processedMessages.delete(messageId), 60000);
 
-        const messageTimestamp =
-            (ms.messageTimestamp?.low || ms.messageTimestamp) * 1000;
+        const timestampValue = ms.messageTimestamp;
+        const timestampSeconds = typeof timestampValue?.toNumber === "function"
+            ? timestampValue.toNumber()
+            : Number(timestampValue?.low ?? timestampValue);
+        const messageTimestamp = timestampSeconds * 1000;
         if (messageTimestamp && messageTimestamp < BOT_START_TIME - 5000) {
             Gifted.commandDiagnostics?.mark("oldTimestampSkipped");
             return;
@@ -656,7 +659,13 @@ function setupCommandHandler(Gifted) {
             : "";
         const isOwnerMessage = Boolean(ownerJid) && rawSender === ownerJid;
         const isOwnMessage = ms.key.fromMe === true || (Boolean(botId) && rawSender === botId);
-        if (type === "append" && !isOwnMessage && !isOwnerMessage) {
+        // WhatsApp can label a live DM as append during reconnect/sync.
+        // Accept recent, timestamped input; do not replay undated/old history
+        // or bypass the normal private-mode and command-specific permissions.
+        const isFreshIncoming = Number.isFinite(messageTimestamp) &&
+            messageTimestamp >= Date.now() - 60000 &&
+            messageTimestamp <= Date.now() + 30000;
+        if (type === "append" && !isOwnMessage && !isOwnerMessage && !isFreshIncoming) {
             Gifted.commandDiagnostics?.mark("historicalSkipped");
             return;
         }
