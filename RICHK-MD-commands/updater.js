@@ -8,7 +8,7 @@ for (const pattern of ["restart", "update"]) {
         category: "owner",
         maintenance: true,
         description: pattern === "restart" ? "Restart safely without clearing the login." :
-            "Fast-forward from origin/main and restart without clearing the login.",
+            "Install the latest RICH-K-MD version.",
         filename: __filename,
     }, async (_from, socket, context) => maintenance.run(pattern, socket, context));
 }

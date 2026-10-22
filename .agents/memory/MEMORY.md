@@ -11,3 +11,4 @@
 - [Heroku engines](heroku-engine-policy.md) — use the approved Node/npm major lines, not broad ranges; check GitHub main for configuration drift.
 - [Recovery retention](recovery-retention.md) — the two-hour RAM limit must not cancel durable recovery retries or expose originals across chats.
 - [Maintenance safety](maintenance-safety.md) — strict owner/connected/sudo access, no logout or credential replacement, and safe fast-forward-only updates.
+- [Clean command responses](command-output-style.md) — no automatic header/footer frames; update notices use the user's plain, nontechnical wording.

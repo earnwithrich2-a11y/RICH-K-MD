@@ -8,9 +8,12 @@ const execute = promisify(execFile);
 const DENIED = "⛔ Only the bot owner can use this command.";
 const TEXT = {
     restart: "🔄 *Restarting RICH-K-MD...* Please wait ~10 seconds.",
-    checking: "🔍 *Checking for updates on GitHub...*",
-    current: "✅ *RICH-K-MD is already up to date!*",
-    updating: "📥 *Updates downloaded! Rebuilding and restarting...*",
+    checking: "🔍 Checking RICH-K-MD servers for updates...",
+    current: "✅ RICH-K-MD is up to date!",
+    updating: "📥 Installing latest version...",
+    unavailable: "❌ Updates are unavailable right now. Please contact the bot owner.",
+    unsafe: "❌ This update cannot be installed safely right now. Please contact the bot owner.",
+    failed: "❌ The update could not be completed. Please try again later.",
 };
 
 function identity(value) {
@@ -103,13 +106,13 @@ function createMaintenanceService({
         await context.reply(TEXT.checking);
         let top;
         try { top = (await command("git", ["rev-parse", "--show-toplevel"])).trim(); }
-        catch { throw new MaintenanceError("❌ This deployment has no Git checkout. Redeploy the latest main branch instead."); }
-        if (path.resolve(top) !== path.resolve(cwd)) throw new MaintenanceError("❌ Update refused: the app is not its own Git checkout.");
+        catch { throw new MaintenanceError(TEXT.unavailable); }
+        if (path.resolve(top) !== path.resolve(cwd)) throw new MaintenanceError(TEXT.unsafe);
         if ((await command("git", ["branch", "--show-current"])).trim() !== "main") {
-            throw new MaintenanceError("❌ Update refused: this checkout must be on main.");
+            throw new MaintenanceError(TEXT.unsafe);
         }
         if ((await command("git", ["status", "--porcelain", "--untracked-files=no"])).trim()) {
-            throw new MaintenanceError("❌ Update refused: tracked files have local changes. Commit them or redeploy first.");
+            throw new MaintenanceError(TEXT.unsafe);
         }
         const before = (await command("git", ["rev-parse", "HEAD"])).trim();
         await command("git", ["fetch", "origin", "main"]);
@@ -119,7 +122,7 @@ function createMaintenanceService({
             await command("git", ["merge-base", "--is-ancestor", before, target]);
             const names = (await command("git", ["diff", "--name-only", "--no-renames", "-z", before, target]))
                 .split("\0").filter(Boolean);
-            if (names.some(protectedPath)) throw new MaintenanceError("❌ Update refused: it changes credentials or runtime databases. Your saved session is untouched.");
+            if (names.some(protectedPath)) throw new MaintenanceError(TEXT.unsafe);
             const oldPackage = JSON.parse(await command("git", ["show", `${before}:package.json`]));
             const newPackage = JSON.parse(await command("git", ["show", `${target}:package.json`]));
             const needsInstall = dependencyChange(oldPackage, newPackage, names);
@@ -138,7 +141,7 @@ function createMaintenanceService({
     return {
         async run(action, socket, context) {
             if (!await isMaintenanceOwner(socket, context)) return context.reply(DENIED);
-            if (busy) return context.reply("⏳ Another maintenance operation is already in progress.");
+            if (busy) return context.reply("⏳ An update or restart is already in progress. Please wait.");
             busy = true;
             try {
                 if (action === "restart") {
@@ -149,7 +152,7 @@ function createMaintenanceService({
             } catch (error) {
                 log(`[Maintenance] ${action} failed during ${stage || "restart preparation"}.`);
                 await context.reply(error instanceof MaintenanceError ? error.message :
-                    "❌ Maintenance failed. Your session was not cleared. Check the server logs or redeploy the latest main branch.");
+                    action === "update" ? TEXT.failed : "❌ Restart could not be completed. Please try again later.");
             } finally { busy = false; }
         },
     };

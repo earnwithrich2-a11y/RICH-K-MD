@@ -120,7 +120,7 @@ test("dependency updates install before restart; Replit registry conversion is r
 test("install failures keep the bot process and auth intact rather than claiming success", async () => {
     const f = fixture({ paths: ["package-lock.json"], fail: (file, args) => file === "npm" && args[0] === "install" });
     await f.service.run("update", f.socket, f.context);
-    assert.match(f.replies.at(-1), /Maintenance failed/);
+    assert.equal(f.replies.at(-1), TEXT.failed);
     assert.equal(f.events.includes("save"), false);
     assert.equal(f.events.includes("close"), false);
     assert.equal(f.events.includes("exit:0"), false);
@@ -145,7 +145,7 @@ test("updates cannot introduce, change or remove session data or runtime databas
         assert.equal(protectedPath(name), true);
         const f = fixture({ paths: [name] });
         await f.service.run("update", f.socket, f.context);
-        assert.match(f.replies.at(-1), /saved session is untouched/);
+        assert.equal(f.replies.at(-1), TEXT.unsafe);
         assert.equal(f.commands.some(([, args]) => args[0] === "merge"), false);
     }
     assert.equal(dependencyChange({}, { description: "changed" }, ["package.json"]), false);
@@ -168,6 +168,24 @@ test("simultaneous maintenance requests cannot overlap", async () => {
     assert.equal(f.commands.length, 0);
     release();
     await running;
+});
+
+test("update statuses use the requested wording and all update notices avoid technical details", async () => {
+    assert.equal(TEXT.checking, "🔍 Checking RICH-K-MD servers for updates...");
+    assert.equal(TEXT.updating, "📥 Installing latest version...");
+    assert.equal(TEXT.current, "✅ RICH-K-MD is up to date!");
+    for (const options of [
+        {}, { current: true }, { dirty: true }, { branch: "feature" },
+        { paths: ["RICHK-MD-core/session/creds.json"] },
+        { fail: () => true },
+        { paths: ["package-lock.json"], fail: (file, args) => file === "npm" && args[0] === "install" },
+    ]) {
+        const f = fixture(options);
+        await f.service.run("update", f.socket, f.context);
+        for (const reply of f.replies) {
+            assert.doesNotMatch(reply, /github|\bgit\b|\bnpm\b|checkout|branch|commit|credential|database|redeploy|server logs|╭─|╰─/i);
+        }
+    }
 });
 
 test("maintenance replies keep the exact requested text rather than premium framing", async () => {
