@@ -4,6 +4,11 @@ require("./RICHK-MD-core/gmdHelpers");
 const smokeTestMode = process.env.BOT_SMOKE_TEST === "1";
 const { canShowCurrentChannelJid } = require("./RICHK-MD-core/connection/channelJid");
 const { attachCommandDiagnostics } = require("./RICHK-MD-core/connection/commandDiagnostics");
+const { installAutomatedMessageGuard } = require("./RICHK-MD-core/connection/automatedMessageGuard");
+const { extractMessageText } = require("./RICHK-MD-core/connection/serializer");
+const { getCommandSettings } = require("./RICHK-MD-core/database/settings");
+const { getCachedSudoNumbers } = require("./RICHK-MD-core/database/sudo");
+const { needsGroupMetadata, runWithPresence, serviceUnavailable } = require("./RICHK-MD-core/connection/commandRuntime");
 
 const {
     default: giftedConnect,
@@ -91,6 +96,7 @@ const { installBranding, runCommandOutput } = require("./RICHK-MD-core/branding"
 const { MenuPromo } = require("./RICHK-MD-core/connection/menuPromo");
 const { RecoveryArchive } = require("./RICHK-MD-core/connection/recoveryArchive");
 const { installMessageRecovery } = require("./RICHK-MD-core/connection/messageRecovery");
+const { sendConnectedGreeting } = require("./RICHK-MD-core/connection/connectedGreeting");
 const config = require("./config");
 const googleTTS = require("google-tts-api");
 const fs = require("fs-extra");
@@ -194,6 +200,7 @@ async function loadBotSettings() {
     await initializeSettings();
     await initializeGroupSettings();
     botSettings = await getAllSettings();
+    await getSudoNumbers();
     return botSettings;
 }
 
@@ -317,60 +324,12 @@ async function startGifted() {
                 await safeGroupAcceptInvite(Gifted, s.GC_JID);
                 await initializeLidStore(Gifted);
 
-                setTimeout(async () => {
-                    try {
-                        const totalCommands = commands.filter(
-                            (c) => c.pattern && !c.dontAddCommandList,
-                        ).length;
-                        console.log("💜 Connected to Whatsapp, Active!");
-
-                        if (s.STARTING_MESSAGE === "true") {
-                            const d = DEFAULT_SETTINGS;
-                            const md =
-                                s.MODE === "public" ? "public" : "private";
-                            const connectionThumbnail = await sharp(
-                                path.join(__dirname, "RICHK-MD-core", "rich-k-logo.png"),
-                            )
-                                .resize(300, 300, { fit: "cover" })
-                                .jpeg({ quality: 82 })
-                                .toBuffer();
-                            const connectionMsg = `
-*${s.BOT_NAME || d.BOT_NAME} 𝐂𝐎𝐍𝐍𝐄𝐂𝐓𝐄𝐃*
-
-𝐏𝐫𝐞𝐟𝐢𝐱       : *[ ${s.PREFIX || d.PREFIX} ]*
-𝐏𝐥𝐮𝐠𝐢𝐧𝐬      : *${totalCommands}*
-𝐌𝐨𝐝𝐞        : *${md}*
-𝐎𝐰𝐧𝐞𝐫       : *${s.OWNER_NUMBER || d.OWNER_NUMBER}*
-𝐖𝐞𝐛𝐬𝐢𝐭𝐞      : *https://richkaurex.site*
-𝐔𝐩𝐝𝐚𝐭𝐞𝐬      : *${s.NEWSLETTER_URL || d.NEWSLETTER_URL}*
-
-𝐍𝐨𝐭𝐞:  Bot may take some few seconds/minutes to sync before being ready to use.
-
-> *${s.CAPTION || d.CAPTION}*`;
-
-                            await Gifted.sendMessage(
-                                Gifted.user.id,
-                                {
-                                    text: connectionMsg,
-                                    ...(await createContext(
-                                        s.BOT_NAME || d.BOT_NAME,
-                                        {
-                                            title: "BOT INTEGRATED",
-                                            body: "Status: Ready for Use",
-                                            thumbnail: connectionThumbnail,
-                                        },
-                                    )),
-                                },
-                                {
-                                    disappearingMessagesInChat: true,
-                                    ephemeralExpiration: 300,
-                                },
-                            );
-                        }
-                    } catch (err) {
-                        console.error("Post-connection setup error:", err);
-                    }
-                }, 5000);
+                console.log("💜 Connected to Whatsapp, Active!");
+                try {
+                    await sendConnectedGreeting(Gifted);
+                } catch (err) {
+                    console.error("Post-connection greeting failed:", err);
+                }
             },
         });
 
@@ -393,7 +352,8 @@ function setupAutoReact(Gifted) {
                 autoReactMode === "off" ||
                 autoReactMode === "false" ||
                 ms.key.fromMe ||
-                !ms.message
+                !ms.message ||
+                extractMessageText(ms).startsWith(s.PREFIX || ".")
             )
                 return;
 
@@ -611,9 +571,11 @@ const processedMessages = new Set();
 const BOT_START_TIME = Date.now();
 
 function setupCommandHandler(Gifted) {
+    const isAutomatedMessage = installAutomatedMessageGuard(Gifted);
     const handleMessage = async (ms, type) => {
         Gifted.commandDiagnostics?.mark("handlerEntries");
         if (!ms?.key) return;
+        if (isAutomatedMessage(ms)) return;
         if (!ms.message) {
             if (ms.messageStubType !== undefined) {
                 console.warn(
@@ -622,11 +584,6 @@ function setupCommandHandler(Gifted) {
             }
             return;
         }
-        if (type === "append" && !ms.key.fromMe) {
-            Gifted.commandDiagnostics?.mark("historicalSkipped");
-            return;
-        }
-
         const messageId = ms.key.id;
         if (processedMessages.has(messageId)) {
             Gifted.commandDiagnostics?.mark("duplicatesSkipped");
@@ -644,9 +601,28 @@ function setupCommandHandler(Gifted) {
         }
 
         Gifted.commandDiagnostics?.mark("settingsStarted");
-        const settings = await getAllSettings();
+        const settings = getCommandSettings();
         Gifted.commandDiagnostics?.mark("settingsLoaded");
-        const botId = standardizeJid(Gifted.user?.id);
+        const botId = standardizeJid(Gifted.user?.id || Gifted.authState?.creds?.me?.id);
+        const dispatchStartedAt = performance.now();
+        const earlyBody = extractMessageText(ms);
+        let reactionStarted = false;
+        const startCommandReaction = () => {
+            if (reactionStarted) return;
+            reactionStarted = true;
+            // Fire before sender mapping, permissions metadata or the task.
+            try {
+                void Gifted.sendMessage(ms.key.remoteJid, {
+                    react: { key: ms.key, text: "⚡" },
+                }).catch(() => console.warn("[WhatsApp] Command reaction unavailable."));
+            } catch { console.warn("[WhatsApp] Command reaction unavailable."); }
+        };
+        const botPausedBeforeChecks =
+            String(settings.BOT_PAUSED || "false").toLowerCase() === "true";
+        const canReactImmediately = !botPausedBeforeChecks &&
+            earlyBody.startsWith(settings.PREFIX || ".") &&
+            (settings.MODE?.toLowerCase() !== "private" || ms.key.fromMe);
+        if (canReactImmediately) startCommandReaction();
 
         const serialized = await serializeMessage(ms, Gifted, settings);
         Gifted.commandDiagnostics?.mark("serialized");
@@ -672,38 +648,33 @@ function setupCommandHandler(Gifted) {
             quotedUser,
         } = serialized;
 
+        const ownerJid = settings.OWNER_NUMBER
+            ? standardizeJid(String(settings.OWNER_NUMBER).replace(/\D/g, ""))
+            : "";
+        const isOwnerMessage = Boolean(ownerJid) && rawSender === ownerJid;
+        const isOwnMessage = ms.key.fromMe === true || (Boolean(botId) && rawSender === botId);
+        if (type === "append" && !isOwnMessage && !isOwnerMessage) {
+            Gifted.commandDiagnostics?.mark("historicalSkipped");
+            return;
+        }
+        // Keep registered incoming text/button workflows, but never interpret
+        // unprefixed outgoing chatter or replies as commands.
+        if (isOwnMessage && !isCommand) return;
+
         const gmd = isCommand && command ? findCommand(command) : null;
+        const bodyCmd = findBodyCommand(body);
         if (isCommand) {
             Gifted.commandDiagnostics?.mark("commandsRecognized");
             console.info(
                 `[WhatsApp] Command text decrypted; registered handler ${gmd ? "found" : "not found"}.`,
             );
         }
-        const startCommandReaction = () => {
-            const reaction =
-                settings.AUTO_REACT === "commands"
-                    ? emojis[Math.floor(Math.random() * emojis.length)]
-                    : gmd?.react;
-            if (!reaction) return;
-            void Gifted.sendMessage(ms.key.remoteJid || from, {
-                react: { key: ms.key, text: reaction },
-            }).catch((error) =>
-                console.error(`Reaction error [${command}]:`, error),
-            );
-        };
-        const botPausedBeforeChecks =
-            String(settings.BOT_PAUSED || "false").toLowerCase() === "true";
-        const canReactImmediately =
-            gmd &&
-            (!botPausedBeforeChecks || gmd.pattern === "pause") &&
-            (settings.MODE?.toLowerCase() !== "private" || ms.key.fromMe);
-        if (canReactImmediately) startCommandReaction();
-
+        if (!gmd && !bodyCmd) return;
         const [groupData, superUser] = await Promise.all([
-            getGroupInfo(Gifted, from, botId, rawSender),
+            getGroupInfo(Gifted, from, botId, rawSender, { allowFetch: needsGroupMetadata(gmd) }),
             buildSuperUsers(
                 settings,
-                getSudoNumbers,
+                getCachedSudoNumbers,
                 botId,
                 settings.OWNER_NUMBER || "",
             ),
@@ -720,7 +691,7 @@ function setupCommandHandler(Gifted) {
             sender,
         } = groupData;
 
-        const isSuperUser = superUser.includes(sender);
+        const isSuperUser = isOwnMessage || isOwnerMessage || superUser.includes(sender);
         const botPaused =
             String(settings.BOT_PAUSED || "false").toLowerCase() === "true";
         const isOwnerPauseCommand =
@@ -768,7 +739,6 @@ function setupCommandHandler(Gifted) {
             );
         }
 
-        const bodyCmd = findBodyCommand(body);
         if (bodyCmd && bodyCmd.function) {
             if (settings.MODE?.toLowerCase() === "private" && !isSuperUser)
                 return;
@@ -804,10 +774,13 @@ function setupCommandHandler(Gifted) {
                     body,
                     command,
                 });
-                await runCommandOutput(command || bodyCmd.pattern, settings,
-                    () => bodyCmd.function(from, Gifted, conText));
+                await runWithPresence(Gifted, from, bodyCmd, () =>
+                    runCommandOutput(command || bodyCmd.pattern, settings,
+                        () => bodyCmd.function(from, Gifted, conText)));
             } catch (error) {
-                console.error(`Body command error:`, error);
+                console.error("[WhatsApp] Body command failed.");
+                try { await Gifted.sendMessage(from, { text: serviceUnavailable() }, { quoted: ms }); }
+                catch { console.warn("[WhatsApp] Error notice unavailable."); }
             }
         }
 
@@ -853,39 +826,37 @@ function setupCommandHandler(Gifted) {
                     command,
                 });
 
-                await runCommandOutput(command, settings, () => gmd.function(from, Gifted, conText));
+                conText.dispatchStartedAt = dispatchStartedAt;
+                await runWithPresence(Gifted, from, gmd, () =>
+                    runCommandOutput(command, settings, () => gmd.function(from, Gifted, conText)));
                 void menuPromo.maybeSend(Gifted, command, ms).catch(() =>
                     console.warn("[Menu promo] Could not process cooldown."));
                 Gifted.commandDiagnostics?.mark("commandsCompleted");
                 console.info("[WhatsApp] Command handler completed.");
             } catch (error) {
-                console.error(`Command error [${command}]:`, error);
+                console.error("[WhatsApp] Command failed; returning a safe service notice.");
                 try {
                     await runCommandOutput(command, settings, async () => Gifted.sendMessage(
                         from,
                         {
-                            text: `🚨 Command failed: ${error.message}`,
-                            ...(await createContext(messageAuthor, {
-                                title: "Error",
-                                body: "Command execution failed",
-                            })),
+                            text: serviceUnavailable(),
                         },
                         { quoted: ms },
                     ));
                 } catch (sendErr) {
-                    console.error("Error sending error message:", sendErr);
+                    console.error("[WhatsApp] Error notice unavailable.");
                 }
             }
         }
     };
     Gifted.ev.on("messages.upsert", async ({ messages = [], type }) => {
-        for (const ms of messages) {
+        await Promise.all(messages.map(async (ms) => {
             try {
                 await handleMessage(ms, type);
             } catch {
                 console.error("[WhatsApp] Message handler failed; continuing with remaining messages.");
             }
-        }
+        }));
     });
 }
 

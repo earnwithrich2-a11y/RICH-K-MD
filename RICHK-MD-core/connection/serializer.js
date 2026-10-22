@@ -25,10 +25,27 @@ const convertLidToJid = (lid) => {
     return lid;
 };
 
+function extractMessageText(ms) {
+    const content = normalizeMessageContent(ms?.message?.deviceSentMessage?.message || ms?.message);
+    if (!content) return '';
+    const interactive = content.interactiveResponseMessage;
+    let buttonId;
+    try {
+        buttonId = JSON.parse(interactive?.nativeFlowResponseMessage?.paramsJson || '{}').id;
+    } catch { /* A malformed button still may contain ordinary text. */ }
+    const text = buttonId || interactive?.buttonId || interactive?.body?.text ||
+        content.buttonsResponseMessage?.selectedButtonId ||
+        content.listResponseMessage?.singleSelectReply?.selectedRowId ||
+        content.templateButtonReplyMessage?.selectedId ||
+        content.conversation || content.extendedTextMessage?.text ||
+        content.imageMessage?.caption || content.videoMessage?.caption || '';
+    return typeof text === 'string' ? text : '';
+}
+
 const serializeMessage = async (ms, Gifted, settings = {}) => {
     if (!ms?.message || !ms?.key) return null;
 
-    const botId = standardizeJid(Gifted.user?.id);
+    const botId = standardizeJid(Gifted.user?.id || Gifted.authState?.creds?.me?.id);
     // Linked-device copies and disappearing/view-once envelopes contain the
     // actual text inside another message. Keep the original for quoting/media.
     const content = normalizeMessageContent(ms.message.deviceSentMessage?.message || ms.message);
@@ -37,9 +54,15 @@ const serializeMessage = async (ms, Gifted, settings = {}) => {
     const ownLid = standardizeJid(Gifted.authState?.creds?.me?.lid || Gifted.user?.lid);
     const remoteJid = standardizeJid(ms.key.remoteJid);
     const remoteJidAlt = standardizeJid(ms.key.remoteJidAlt);
+    const ownJids = [botId, ownLid].filter(Boolean);
+    const isOwnStatus = remoteJid === 'status@broadcast' &&
+        (ms.key.fromMe === true ||
+            [ms.key.participant, ms.key.participantAlt, ms.key.participantPn]
+                .some(jid => ownJids.includes(standardizeJid(jid))));
+    // Status/notes commands are private controls, not broadcast replies.
+    if (remoteJid === 'status@broadcast' && !isOwnStatus) return null;
     const isMessageYourself =
-        ms.key.fromMe &&
-        ((botId && remoteJid === botId) ||
+        isOwnStatus || ((botId && remoteJid === botId) ||
             (remoteJid.endsWith('@lid') &&
                 ((ownLid && remoteJid === ownLid) ||
                     (botId && remoteJidAlt === botId) ||
@@ -47,9 +70,22 @@ const serializeMessage = async (ms, Gifted, settings = {}) => {
     const from = isMessageYourself ? botId : remoteJid;
     const isGroup = from.endsWith('@g.us');
     
-    const sendr = ms.key.fromMe 
+    let sendr = (ms.key.fromMe || isMessageYourself)
         ? botId
-        : (ms.key.senderPn || ms.key.participantPn || ms.key.participantAlt || ms.key.remoteJidAlt || ms.key.remoteJid || ms.key.participant);
+        : (ms.key.senderPn || ms.key.participantPn || ms.key.participantAlt ||
+            (isGroup ? ms.key.participant : ms.key.remoteJidAlt || ms.key.remoteJid));
+    sendr = standardizeJid(sendr);
+    if (sendr.endsWith('@lid')) {
+        try {
+            sendr = standardizeJid(
+                await Gifted.signalRepository?.lidMapping?.getPNForLID(sendr) ||
+                convertLidToJid(sendr),
+            );
+        } catch {
+            // Missing mappings must not grant phone-number owner privileges.
+            sendr = convertLidToJid(sendr);
+        }
+    }
     
     let body = '';
     let isButtonResponse = false;
@@ -179,6 +215,7 @@ const serializeMessage = async (ms, Gifted, settings = {}) => {
 };
 
 module.exports = {
+    extractMessageText,
     standardizeJid,
     convertLidToJid,
     serializeMessage,

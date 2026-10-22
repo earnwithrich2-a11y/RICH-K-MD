@@ -9,6 +9,12 @@ Commands sent by the linked bot account in someone else's chat should reply in t
 
 **How to apply:** Keep command-author identity separate from reply destination. Missing aliases must not count as matching identities; retain genuinely verified alternate self-chat addresses. Exercise real message parsing for outgoing commands in both phone-addressed and LID-addressed chats, in public and private mode. Preserve owner permissions and original message metadata when reading wrapped content.
 
+The user also expects self-chat, including their own status/notes-style messages, to accept prefixed commands and reply privately.
+
+**Why:** The user explicitly requested these entry points after reporting that commands worked in other people's chats but not their own. Human outgoing messages must not be mistaken for automated bot output.
+
+**How to apply:** Preserve owner and linked-account access without broadcasting notes/status command replies. Classify actual automated sends, not all `fromMe` messages or generic SDK-looking message IDs. Synthetic success is not proof that the phone has an authenticated connection.
+
 Retain retry copies of bot-generated messages independently of live message-event delivery, including messages sent to other people's chats.
 
 **Why:** A recipient screenshot showed a readable command followed by unreadable bot messages. Inspection found explicit retry persistence limited to self-chat, and recovery across phone/LID addresses limited to self-chat too. These are recovery gaps, not proof of the initial encryption failure.

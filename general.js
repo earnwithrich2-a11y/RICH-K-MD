@@ -10,6 +10,7 @@ const { gmd, commands, monospace, formatBytes } = require("../RICHK-MD-core"),
   ram = `${formatBytes(freeMemoryBytes)}/${formatBytes(totalMemoryBytes)}`;
 const { sendButtons } = require("gifted-btns");
 const { selfChatPingDestination } = require("../RICHK-MD-core/connection/selfChatPingRoute");
+const { performancePanel } = require("../RICHK-MD-core/connection/performanceStats");
 const { rememberMenu } = require("../RICHK-MD-core/menuState");
 const richKLogo = fs.readFileSync(path.join(__dirname, "../RICHK-MD-core/rich-k-logo.png"));
 
@@ -26,7 +27,7 @@ gmd(
 gmd(
   {
     pattern: "ping",
-    aliases: ["pi", "p"],
+    aliases: ["pi", "p", "speed"],
     react: "⚡",
     category: "general",
     description: "Check bot response speed",
@@ -41,19 +42,10 @@ gmd(
       botName,
       botPrefix,
     } = conText;
-    const startTime = process.hrtime();
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.floor(80 + Math.random() * 420)),
-    );
-
-    const elapsed = process.hrtime(startTime);
-    const responseTime = Math.floor(elapsed[0] * 1000 + elapsed[1] / 1000000);
-
     await sendButtons(Gifted, selfChatPingDestination(from, mek, Gifted), {
-      title: "Bot Speed",
-      text: `⚡ Pong: ${responseTime}ms`,
-      footer: `> *${botFooter}*`,
+      title: "Live Performance",
+      text: performancePanel(conText.dispatchStartedAt),
+      footer: "RICH-K-MD",
       buttons: [
         { id: `${botPrefix}uptime`, text: "⏱️ Uptime" },
         {

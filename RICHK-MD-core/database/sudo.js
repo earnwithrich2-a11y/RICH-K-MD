@@ -17,8 +17,13 @@ const SudoDB = DATABASE.define('SudoUser', {
     timestamps: true,
 });
 
-async function initializeSudoDB() {
-    await SudoDB.sync();
+let initialization;
+function initializeSudoDB() {
+    if (!initialization) initialization = SudoDB.sync().catch(error => {
+        initialization = null;
+        throw error;
+    });
+    return initialization;
 }
 
 let _sudoCache = null;
@@ -31,6 +36,10 @@ async function getSudoNumbers() {
     return _sudoCache;
 }
 
+function getCachedSudoNumbers() {
+    return [...(_sudoCache || [])];
+}
+
 async function setSudo(number) {
     await initializeSudoDB();
     try {
@@ -38,7 +47,8 @@ async function setSudo(number) {
             where: { number: number },
             defaults: { number: number },
         });
-        _sudoCache = null;
+        if (_sudoCache) _sudoCache = [...new Set([..._sudoCache, number])];
+        else await getSudoNumbers();
         return created;
     } catch (error) {
         console.error('[SUDO][SET_ERROR]:', error);
@@ -52,7 +62,7 @@ async function delSudo(number) {
         const deleted = await SudoDB.destroy({
             where: { number: number },
         });
-        _sudoCache = null;
+        if (_sudoCache) _sudoCache = _sudoCache.filter(value => value !== number);
         return deleted > 0;
     } catch (error) {
         console.error('[SUDO][DEL_ERROR]:', error);
@@ -64,7 +74,7 @@ async function clearAllSudo() {
     await initializeSudoDB();
     try {
         const deleted = await SudoDB.destroy({ where: {} });
-        _sudoCache = null;
+        _sudoCache = [];
         return deleted;
     } catch (error) {
         console.error('[SUDO][CLEAR_ALL_ERROR]:', error);
@@ -88,6 +98,7 @@ async function isSuperUser(jid, Gifted) {
 module.exports = {
     SudoDB,
     getSudoNumbers,
+    getCachedSudoNumbers,
     setSudo,
     delSudo,
     clearAllSudo,

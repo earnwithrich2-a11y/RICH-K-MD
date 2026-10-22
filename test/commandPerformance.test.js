@@ -39,10 +39,10 @@ test("dispatcher reactions do not block command execution", () => {
     );
 
     assert.match(reactionHelper, /void\s+Gifted\.sendMessage\s*\(/);
-    assert.match(reactionHelper, /sendMessage\(ms\.key\.remoteJid\s*\|\|\s*from/);
+    assert.match(reactionHelper, /sendMessage\(ms\.key\.remoteJid/);
     assert.doesNotMatch(reactionHelper, /\bawait\b/);
     assert.doesNotMatch(handler, /await\s+startCommandReaction\s*\(/);
-    assert.match(handler, /await\s+runCommandOutput\(command,\s*settings,\s*\(\)\s*=>\s*gmd\.function\(/);
+    assert.match(handler, /runCommandOutput\(command,\s*settings,\s*\(\)\s*=>\s*gmd\.function\(/);
 });
 
 test("group and owner lookups remain concurrent", () => {
@@ -130,7 +130,7 @@ test("private-mode access checks run before restricted reactions", () => {
     assert.match(deferredPolicy, /!isSuperUser/);
 
     const superUserCheck = handler.indexOf(
-        "const isSuperUser = superUser.includes(sender);",
+        "const isSuperUser = isOwnMessage || isOwnerMessage || superUser.includes(sender);",
     );
     const deferredReaction = handler.indexOf(
         "if (commandAllowed && !canReactImmediately) startCommandReaction();",
@@ -164,7 +164,7 @@ test("dispatcher safely distinguishes placeholders from parsed commands", () => 
     const noContentBranch = sourceBetween(
         handler,
         "if (!ms.message) {",
-        'if (type === "append" && !ms.key.fromMe)',
+        "const messageId",
     );
 
     assert.match(noContentBranch, /ms\.messageStubType/);

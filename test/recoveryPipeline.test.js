@@ -9,9 +9,15 @@ const { RecoveryArchive } = require("../RICHK-MD-core/connection/recoveryArchive
 const { installMessageRecovery } = require("../RICHK-MD-core/connection/messageRecovery");
 
 const chat = "1000@s.whatsapp.net";
-const owner = "2000@s.whatsapp.net";
+const connectedUser = "3000@s.whatsapp.net";
 function original(id = "original", message = { conversation: "original text" }, jid = chat) {
-    return { key: { id, remoteJid: jid, fromMe: false }, message, pushName: "Test User" };
+    return {
+        key: {
+            id, remoteJid: jid, fromMe: false,
+            participant: jid.endsWith("@g.us") ? "1000@s.whatsapp.net" : undefined,
+        },
+        message, pushName: "Test User", messageTimestamp: 1720000000,
+    };
 }
 function protocol(type, id = "original", editedMessage, timestampMs) {
     return original("event", { protocolMessage: { type, key: { id, remoteJid: chat, fromMe: false }, editedMessage, timestampMs } });
@@ -20,7 +26,12 @@ function fixture(t, options = {}) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "recovery-test-"));
     const archive = new RecoveryArchive(dir);
     const sent = [];
-    const socket = { ev: new EventEmitter(), sendMessage: async (jid, content) => { sent.push({ jid, content }); } };
+    const socket = {
+        ev: new EventEmitter(),
+        user: { id: "3000:7@s.whatsapp.net" },
+        signalRepository: { lidMapping: { getPNForLID: async () => undefined } },
+        sendMessage: async (jid, content) => { sent.push({ jid, content }); },
+    };
     const controller = installMessageRecovery(socket, {
         archive, getSettings: async () => ({ OWNER_NUMBER: "2000", ANTIDELETE: "indm", ANTI_EDIT: "indm" }),
         download: async () => Readable.from(Buffer.from("original media")),
@@ -40,9 +51,28 @@ test("captures whole batch immediately, even when revoke appears before original
     assert.equal(f.archive.find(chat, "original").original.message.conversation, "original text");
     await f.controller.flush();
     assert.equal(f.sent.length, 1);
-    assert.equal(f.sent[0].jid, owner);
+    assert.equal(f.sent[0].jid, connectedUser);
     assert.match(f.sent[0].content.text, /original text/);
+    assert.match(f.sent[0].content.text, /Timestamp: 2024-07-03T09:46:40\.000Z/);
+    assert.match(f.sent[0].content.text, /Sender: @1000 \(Test User\)/);
+    assert.deepEqual(f.sent[0].content.mentions, ["1000@s.whatsapp.net"]);
     assert.equal(f.archive.due().length, 0);
+});
+
+test("in-chat mode sends group recoveries to their original group", async t => {
+    const group = "4000@g.us";
+    const f = fixture(t, {
+        getSettings: async () => ({ ANTIDELETE: "inchat", ANTI_EDIT: "inchat" }),
+    });
+    f.socket.ev.emit("messages.upsert", { messages: [
+        original("group-message", { conversation: "group text" }, group),
+        original("revoke", { protocolMessage: {
+            type: 0, key: { id: "group-message", remoteJid: group, fromMe: false },
+        } }, group),
+    ] });
+    await f.controller.flush();
+    assert.equal(f.sent[0].jid, group);
+    assert.match(f.sent[0].content.text, /group text/);
 });
 
 test("handles protocol 14 plus SDK editedMessage update once; keeps first original", async t => {
@@ -80,7 +110,7 @@ for (const [type, field] of Object.entries({
         f.socket.ev.emit("messages.upsert", { messages: [original("original", { [type]: data }), protocol(0)] });
         await f.controller.flush();
         assert.equal(f.sent.length, 2);
-        assert.equal(f.sent[1].jid, owner);
+        assert.equal(f.sent[1].jid, connectedUser);
         const content = f.sent[1].content;
         assert.equal(fs.readFileSync(content[field].url).toString(), "original media");
         assert.equal(content.mimetype, "test/type");
@@ -131,6 +161,9 @@ test("failed media send retries without repeating the already delivered alert", 
     };
     f.socket.ev.emit("messages.upsert", { messages: [original("original", { audioMessage: { ptt: true } }), protocol(0)] });
     await f.controller.flush();
+    assert.match(f.sent[0].content.text, /Original: \[audioMessage\]/);
+    assert.match(f.sent[0].content.text, /Sender: @1000 \(Test User\)/);
+    assert.deepEqual(f.sent[0].content.mentions, ["1000@s.whatsapp.net"]);
     f.archive.db.prepare("UPDATE deliveries SET next = 0").run();
     await f.controller.flush();
     assert.equal(f.sent.length, 2);

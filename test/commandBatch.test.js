@@ -7,24 +7,32 @@ const { EventEmitter } = require("node:events");
 const { makeEventBuffer } = require("gifted-baileys/lib/Utils/event-buffer");
 const { serializeMessage, standardizeJid } = require("../RICHK-MD-core/connection/serializer");
 
-function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(), { realSerializer = false, mode = "public" } = {}) {
+function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(), {
+    realSerializer = false, mode = "public", ownerNumber = "", echoReplies = false, beforeReply,
+} = {}) {
     const source = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
     const start = source.indexOf("function setupCommandHandler(");
     const end = source.indexOf("function setupGiftedHelpers(", start);
     const calls = [];
     const replies = [];
+    const reactions = [];
     let reads = 0;
-    const settings = { PREFIX: ".", MODE: mode, BOT_PAUSED: "false" };
+    const settings = { PREFIX: ".", MODE: mode, BOT_PAUSED: "false", OWNER_NUMBER: ownerNumber };
     const setup = vm.runInNewContext(
         `(() => { ${source.slice(start, end)} return setupCommandHandler; })()`,
         {
+            installAutomatedMessageGuard: require("../RICHK-MD-core/connection/automatedMessageGuard").installAutomatedMessageGuard,
             processedMessages: new Set(),
             BOT_START_TIME: Date.now(),
             console: { info() {}, warn() {}, error() {} },
+            performance,
+            extractMessageText: require("../RICHK-MD-core/connection/serializer").extractMessageText,
+            ...require("../RICHK-MD-core/connection/commandRuntime"),
+            getCachedSudoNumbers: () => [],
             setTimeout() {},
             runCommandOutput: require("../RICHK-MD-core/branding").runCommandOutput,
             menuPromo: { maybeSend: async () => false },
-            async getAllSettings() {
+            getCommandSettings() {
                 if (++reads === 1 && failFirstSettingsRead) throw new Error("Synthetic read failure");
                 return settings;
             },
@@ -46,6 +54,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
                 pattern,
                 async function(from, socket, context) {
                     calls.push(context.fixtureId);
+                    if (beforeReply) await beforeReply(context);
                     await socket.sendMessage(from, { text: `reply:${context.fixtureId}` });
                 },
             }),
@@ -61,12 +70,29 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
     );
     const socket = {
         user: { id: realSerializer ? "synthetic-bot:7@s.whatsapp.net" : "synthetic-bot" }, ev,
-        sendMessage: async (from, payload) => { replies.push({ from, payload }); },
+        sendMessage: async (from, payload, options) => {
+            if (payload.react) {
+                reactions.push({ from, payload });
+                return { key: { id: options?.messageId, fromMe: true, remoteJid: from } };
+            }
+            replies.push({ from, payload });
+            const sent = {
+                key: { remoteJid: from, fromMe: true, id: options?.messageId },
+                message: { conversation: echoReplies ? ".ping" : payload.text },
+                messageTimestamp: Math.floor(Date.now() / 1000),
+            };
+            if (echoReplies) {
+                if (replies.length > 4) throw new Error("Automated reply loop");
+                await socket.ev.listeners("messages.upsert")[0]({ messages: [sent], type: "notify" });
+            }
+            return sent;
+        },
     };
     setup(socket);
     return {
         calls,
         replies,
+        reactions,
         receive: ev instanceof EventEmitter ? socket.ev.listeners("messages.upsert")[0] : undefined,
         socket,
     };
@@ -79,6 +105,181 @@ function message(id, body = ".ping") {
         message: { conversation: body },
     };
 }
+
+test("human own-account commands execute in self-chat, peer chats and groups in either mode", async () => {
+    for (const mode of ["public", "private"]) {
+        const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true, mode });
+        f.socket.user.lid = "synthetic-own:7@lid";
+        for (const [i, remoteJid] of [
+            "synthetic-bot@s.whatsapp.net", "synthetic-own@lid",
+            "synthetic-friend@s.whatsapp.net", "synthetic-group@g.us",
+        ].entries()) {
+            const ms = message(`BAE5-human-${mode}-${i}`);
+            ms.key.remoteJid = remoteJid;
+            await f.receive({ messages: [ms], type: "notify" });
+        }
+        assert.equal(f.calls.length, 4);
+        assert.deepEqual(f.replies.map(r => r.from), [
+            "synthetic-bot@s.whatsapp.net", "synthetic-bot@s.whatsapp.net",
+            "synthetic-friend@s.whatsapp.net", "synthetic-group@g.us",
+        ]);
+    }
+});
+
+test("fromMe commands marked by Baileys reach self-chat and device-suffixed peer chats", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        realSerializer: true, mode: "private",
+    });
+    const routes = [
+        [".menu", "synthetic-bot:9@s.whatsapp.net", "synthetic-bot@s.whatsapp.net"],
+        [".ping", "synthetic-friend:12@s.whatsapp.net", "synthetic-friend@s.whatsapp.net"],
+        [".settings", "synthetic-bot@s.whatsapp.net", "synthetic-bot@s.whatsapp.net"],
+        [".alive", "synthetic-friend@s.whatsapp.net", "synthetic-friend@s.whatsapp.net"],
+    ];
+
+    for (const [index, [body, remoteJid]] of routes.entries()) {
+        const ms = message(`self-command-${index}`, body);
+        ms.key.remoteJid = remoteJid;
+        ms.key.fromMe = true;
+        ms.isBaileys = true;
+        await f.receive({ messages: [ms], type: "notify" });
+    }
+
+    assert.deepEqual(f.calls, routes.map((_, index) => `self-command-${index}`));
+    assert.deepEqual(f.replies.map(reply => reply.from), routes.map(([, , destination]) => destination));
+});
+
+test("incoming owner commands delivered as fresh append events are allowed in private mode", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        realSerializer: true, mode: "private", ownerNumber: "15550000002",
+    });
+    const ms = message("owner-append");
+    Object.assign(ms.key, { fromMe: false, remoteJid: "15550000002@s.whatsapp.net" });
+    await f.receive({ messages: [ms], type: "append" });
+    assert.deepEqual(f.calls, ["owner-append"]);
+    assert.equal(f.replies[0].from, "15550000002@s.whatsapp.net");
+    const stranger = message("stranger-private");
+    Object.assign(stranger.key, { fromMe: false, remoteJid: "15550000003@s.whatsapp.net" });
+    await f.receive({ messages: [stranger], type: "notify" });
+    assert.equal(f.calls.length, 1);
+});
+
+test("a slow command in a batch cannot delay another command or its instant reaction", async () => {
+    let release;
+    const slow = new Promise(resolve => { release = resolve; });
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        beforeReply: context => context.fixtureId === "slow" ? slow : undefined,
+    });
+    const processing = f.receive({
+        type: "notify", messages: [message("slow"), message("fast")],
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.calls, ["slow", "fast"]);
+    assert.deepEqual(f.replies.map(reply => reply.payload.text), ["reply:fast"]);
+    assert.equal(f.reactions.length, 2);
+    assert.ok(f.reactions.every(reaction => reaction.payload.react.text === "⚡"));
+    release();
+    await processing;
+    assert.equal(f.replies.length, 2);
+});
+
+test("prefix feedback happens before a slow LID sender lookup", async () => {
+    let finishMapping;
+    const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true });
+    f.socket.signalRepository = {
+        lidMapping: { getPNForLID: () => new Promise(resolve => { finishMapping = resolve; }) },
+    };
+    const ms = message("slow-mapping");
+    Object.assign(ms.key, { fromMe: false, remoteJid: "friend@lid" });
+    const processing = f.receive({ type: "notify", messages: [ms] });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.reactions.length, 1);
+    assert.equal(f.calls.length, 0);
+    finishMapping("15550000002@s.whatsapp.net");
+    await processing;
+    assert.deepEqual(f.calls, ["slow-mapping"]);
+});
+
+test("a failed command returns a polished notice without exposing provider error details", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        beforeReply: () => { throw new Error("provider-secret-internal-details"); },
+    });
+    await f.receive({ type: "notify", messages: [message("failure")] });
+    assert.equal(f.replies.length, 1);
+    assert.match(f.replies[0].payload.text, /Service momentarily unavailable/);
+    assert.doesNotMatch(f.replies[0].payload.text, /provider-secret/);
+});
+
+test("owner LID commands require a verified phone mapping and self-chat works without fromMe", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        realSerializer: true, mode: "private", ownerNumber: "15550000002",
+    });
+    f.socket.signalRepository = {
+        lidMapping: { getPNForLID: async lid => lid === "verified-owner@lid" ? "15550000002@s.whatsapp.net" : undefined },
+    };
+    for (const [id, remoteJid] of [
+        ["verified-owner", "verified-owner@lid"],
+        ["unverified-lid", "15550000002@lid"],
+        ["self-without-flag", "synthetic-bot@s.whatsapp.net"],
+    ]) {
+        const ms = message(id);
+        Object.assign(ms.key, { fromMe: false, remoteJid });
+        await f.receive({ messages: [ms], type: "append" });
+    }
+    assert.deepEqual(f.calls, ["verified-owner", "self-without-flag"]);
+    assert.equal(f.replies[0].from, "verified-owner@lid");
+    assert.equal(f.replies[1].from, "synthetic-bot@s.whatsapp.net");
+});
+
+test("old owner command history is not replayed", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        realSerializer: true, mode: "private", ownerNumber: "15550000002",
+    });
+    const ms = message("old-owner");
+    Object.assign(ms.key, { fromMe: false, remoteJid: "15550000002@s.whatsapp.net" });
+    ms.messageTimestamp -= 60;
+    await f.receive({ messages: [ms], type: "append" });
+    assert.equal(f.calls.length, 0);
+});
+
+test("self-chat and own status commands use credential identity when socket.user is unavailable", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true, mode: "private" });
+    f.socket.user = undefined;
+    f.socket.authState = { creds: { me: { id: "synthetic-bot:7@s.whatsapp.net", lid: "synthetic-own@lid" } } };
+    for (const [i, remoteJid] of ["synthetic-bot@s.whatsapp.net", "synthetic-own@lid", "status@broadcast"].entries()) {
+        const ms = message(`own-notes-${i}`);
+        ms.key.remoteJid = remoteJid;
+        await f.receive({ messages: [ms], type: "append" });
+    }
+    assert.equal(f.calls.length, 3);
+    assert.ok(f.replies.every(r => r.from === "synthetic-bot@s.whatsapp.net"));
+});
+
+test("synchronously echoed prefixed bot replies cannot loop, while a second human command still runs", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true, echoReplies: true });
+    for (const id of ["BAE5-human-first", "3EB0-human-second"]) {
+        const ms = message(id);
+        ms.key.remoteJid = "synthetic-bot@s.whatsapp.net";
+        await f.receive({ messages: [ms], type: "notify" });
+        // Re-delivered copies of the same human command must not execute twice.
+        await f.receive({ messages: [ms], type: "notify" });
+    }
+    assert.deepEqual(f.calls, ["BAE5-human-first", "3EB0-human-second"]);
+    assert.equal(f.replies.length, 2);
+});
+
+test("explicit automated messages and unprefixed own chatter never execute commands", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), { realSerializer: true });
+    await f.receive({
+        type: "notify",
+        messages: [
+            { ...message("flagged-self-command", ".menu"), isBaileys: true },
+            { ...message("plain-own", "hello"), isBaileys: true },
+        ],
+    });
+    assert.deepEqual(f.calls, ["flagged-self-command"]);
+    assert.equal(f.replies.length, 1);
+});
 
 test("each command in a buffered message batch reaches its handler", async () => {
     const harness = dispatcherHarness();

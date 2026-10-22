@@ -49,8 +49,8 @@ Do not commit session data or local database files.
 ## Message recovery and promotion
 
 Incoming originals are captured synchronously before delete/edit processing.
-Recovery sends to the configured `OWNER_NUMBER`, not necessarily the linked bot
-account. Owner notifications are sent before media download/upload; failed
+Recovery defaults to the connected session user's own DM, or the original chat
+when in-chat recovery is selected. Notifications are sent before media download/upload; failed
 deliveries persist and retry. The recovery archive is private local session data:
 seven-day retention, 10,000 hot in-memory messages, 32 MiB per media item and a
 512 MiB media budget. Pending recoveries are preserved rather than evicted.
@@ -66,6 +66,8 @@ chat can send the additional promotion. Normal panels remain in the original
 chat, visible to both people. A shared, durable 12-hour per-person cooldown covers
 both commands and PN/LID aliases; groups, channels, self-chat, incoming commands,
 aliases such as `.help`, and all other commands cannot trigger that promotion.
+Ordinary text/captions now use a compact non-promotional RICH-K-MD frame;
+standalone URLs, code/JSON and protocol controls remain unchanged.
 Reactions, deletes and protocol control packets are not changed.
 Promotion commands provide instructions, not a live
 balance lookup, payment processing or a guarantee of third-party service availability.
@@ -76,3 +78,6 @@ Replit's package security policy blocks the upstream `gifted-dls` and
 `gifted-btns` packages. Downloader commands use direct HTTP APIs instead of
 `gifted-dls`. A local `gifted-btns` compatibility package preserves standard
 button messages and renders copy/link actions as ordinary message text.
+
+See `deployment-performance.md` for cache/routing behavior, Node compatibility,
+single-process Heroku formation and ephemeral session-storage limitations.
