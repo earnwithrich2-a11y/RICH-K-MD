@@ -22,7 +22,12 @@ function supervise({
         child.once("error", () => console.error("[Supervisor] Bot process could not start."));
         child.once("exit", (code) => {
             if (stopping) return exit(0);
-            if (code === 0) return exit(0);
+            if (code === 0) {
+                attempts = 0;
+                console.info("[Supervisor] Bot requested a clean restart.");
+                timer = schedule(start, 1000);
+                return;
+            }
             if (Date.now() - started > 60000) attempts = 0;
             const delay = restartDelay(attempts++);
             console.error(`[Supervisor] Bot exited unexpectedly; restarting in ${delay}ms.`);

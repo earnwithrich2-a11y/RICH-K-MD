@@ -10,3 +10,4 @@
 - [Repository history safety](repository-history-safety.md) — historical GitHub uploads included private runtime databases; a clean current tree does not remove that exposure.
 - [Heroku engines](heroku-engine-policy.md) — use the approved Node/npm major lines, not broad ranges; check GitHub main for configuration drift.
 - [Recovery retention](recovery-retention.md) — the two-hour RAM limit must not cancel durable recovery retries or expose originals across chats.
+- [Maintenance safety](maintenance-safety.md) — strict owner/connected/sudo access, no logout or credential replacement, and safe fast-forward-only updates.

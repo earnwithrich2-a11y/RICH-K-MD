@@ -29,14 +29,16 @@ test("portable lock agrees with package.json and pins the supported patched SDK"
     }
 });
 
-test("worker deployment and Docker install use the real entry and copied local packages", () => {
+test("worker and Docker launch the restart supervisor and install copied local packages", () => {
     const root = path.join(__dirname, "..");
-    assert.match(fs.readFileSync(path.join(root, "Procfile"), "utf8"), /^worker: node index\.js$/m);
+    assert.match(fs.readFileSync(path.join(root, "Procfile"), "utf8"), /^worker: npm start$/m);
     assert.deepEqual(require("../app.json").formation, { worker: { quantity: 1, size: "basic" } });
     const docker = fs.readFileSync(path.join(root, "Dockerfile"), "utf8");
     assert.ok(docker.indexOf("COPY . .") < docker.indexOf("RUN npm ci --omit=dev"));
     assert.match(fs.readFileSync(path.join(root, ".dockerignore"), "utf8"), /RICHK-MD-core\/session/);
-    assert.equal(manifest.scripts.start, "node index.js");
+    assert.equal(manifest.scripts.start, "node scripts/run-bot.js");
+    assert.match(docker, /CMD \["npm", "start"\]/);
+    assert.match(fs.readFileSync(path.join(root, "scripts/run-bot.js"), "utf8"), /\["index\.js"\]/);
 });
 test("registry normalization preserves package versions, integrity hashes and unrelated URLs", () => {
     const proxy = {

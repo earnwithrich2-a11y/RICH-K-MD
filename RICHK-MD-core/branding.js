@@ -10,6 +10,7 @@ function runCommandOutput(command, settings, work) {
     return outputContext.run({
         clean: !["menu", "settings"].includes(command),
         keepResultLinks: explicitLinkResults.has(command),
+        premium: !["restart", "update", "updatenow", "updt", "sync"].includes(command),
         footer: settings.FOOTER, caption: settings.CAPTION,
     }, work);
 }
@@ -66,7 +67,7 @@ function installBranding(socket) {
     socket.sendMessage = (jid, content, options) => {
         const policy = outputContext.getStore();
         const cleaned = policy?.clean ? cleanContent(content, policy) : content;
-        return send(jid, policy ? premiumContent(cleaned) : cleaned, options);
+        return send(jid, policy && policy.premium !== false ? premiumContent(cleaned) : cleaned, options);
     };
     const relay = socket.relayMessage.bind(socket);
     socket.relayMessage = (jid, message, options) => {

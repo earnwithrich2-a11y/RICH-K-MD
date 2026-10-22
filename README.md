@@ -51,6 +51,25 @@ The source is organized into `RICHK-MD-core` (runtime, settings and local data) 
    npm run dev
    ```
 
+## Owner maintenance commands
+
+- `.restart` acknowledges the request, waits two seconds, saves the current auth
+  state, closes the WhatsApp transport without logging out, and exits cleanly.
+  PM2 or the bundled supervisor starts the bot again with the existing session.
+- `.update` requires a writable Git checkout on `main` with a configured `origin`.
+  It fetches and fast-forwards only, refusing local tracked changes, divergent
+  history, or updates that modify session files, environment files or runtime
+  databases. Dependencies are installed only when dependency/install inputs change.
+  Installation errors are reported without requesting a restart.
+
+Only the configured owner, connected WhatsApp account or explicitly configured
+sudo users can run these commands. General developer/super-user privileges are
+not sufficient. Neither command deletes session files or calls WhatsApp logout.
+
+Deployments without `.git` metadata must redeploy the latest GitHub `main` for
+code updates; `.update` reports this clearly. `.restart` still works under the
+configured supervisor. Run only one bot instance per WhatsApp session.
+
 ## Validation
 
 ```bash
