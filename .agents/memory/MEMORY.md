@@ -8,3 +8,4 @@
 - [Group URL lock policy](group-url-lock-policy.md) — only group admins and the group owner are exempt; global bot-owner or sudo status is not enough.
 - [Logo generation availability](logo-generation.md) — basic text logos must work independently of specialty providers; never silently substitute a different named effect.
 - [Repository history safety](repository-history-safety.md) — historical GitHub uploads included private runtime databases; a clean current tree does not remove that exposure.
+- [Heroku engines](heroku-engine-policy.md) — use the approved Node/npm major lines, not broad ranges; check GitHub main for configuration drift.

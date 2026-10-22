@@ -7,7 +7,7 @@ const manifest = require("../package.json");
 const lock = require("../package-lock.json");
 
 test("Heroku major versions, Git allowance and peer dependency policy are explicit", () => {
-    assert.deepEqual(manifest.engines, { node: ">=20.x <22.x", npm: ">=10.x" });
+    assert.deepEqual(manifest.engines, { node: "20.x", npm: "10.x" });
     const config = fs.readFileSync(path.join(__dirname, "../.npmrc"), "utf8");
     assert.match(config, /^allow-git=true$/m);
     assert.match(config, /^legacy-peer-deps=true$/m);
