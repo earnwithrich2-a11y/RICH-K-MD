@@ -33,7 +33,7 @@ function timestampText(message, fallback) {
 
 async function senderDetails(socket, original, eventKey) {
     const key = original?.key || eventKey || {};
-    let jid = key.participantPn || key.senderPn || key.participant ||
+    let jid = key.participantPn || key.senderPn || key.participantAlt || key.participant ||
         key.remoteJidAlt || key.remoteJid || "";
     if (jid.endsWith("@lid")) {
         try {
@@ -55,6 +55,7 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
     let online = initiallyOnline;
     let stopped = false;
     let lastCleanup = 0;
+    let lastMemoryCleanup = 0;
     const active = new Map();
     const downloading = new Set();
     const mediaQueue = new Set();
@@ -72,10 +73,15 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         }
     }
     function capture(message) {
-        const key = archive.capture(message);
+        let key;
+        try { key = archive.capture(message); }
+        catch {
+            console.error("[Recovery] Original persistence failed; retained in memory.");
+            key = archive.cached(message.key?.remoteJid, message.key?.id)?.key;
+        }
         if (key && Object.keys(MEDIA).some(type => unwrap(message.message)?.[type])) mediaQueue.add(key);
     }
-    function queue(kind, key, edited, timestamp) {
+    function queue(kind, key, edited, timestamp, actorKey) {
         if (!key?.id || !key.remoteJid || key.fromMe || key.remoteJid === "status@broadcast") return;
         const row = archive.find(key.remoteJid, key.id);
         const fingerprint = kind === "edit"
@@ -84,7 +90,7 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         archive.enqueue({
             key: `${originalKey}\0${kind}\0${fingerprint}`,
             originalKey, chat: key.remoteJid, id: key.id, kind, edited,
-            eventKey: key, timestamp, alertSent: false,
+            eventKey: key, actorKey, timestamp, alertSent: false,
         });
     }
     async function deliver(job) {
@@ -99,7 +105,16 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         const message = row?.original.message;
         const label = event.kind === "delete" ? "DELETED MESSAGE" : "EDITED MESSAGE";
         const sender = await senderDetails(socket, row?.original, event.eventKey);
+        const actor = event.kind === "delete" && event.actorKey
+            ? await senderDetails(socket, null, event.actorKey.fromMe
+                ? { remoteJid: connectedUserJid(socket) } : event.actorKey)
+            : null;
+        const knownActor = actor && !actor.display.endsWith("@g.us") ? actor : null;
         const alert = `*RICH-K-MD • ${label}*\n\n` +
+            (event.kind === "delete"
+                ? `${row ? "🗑️ Recovered deleted message from" : "🗑️ Deleted message from"} ${sender.display}\n` +
+                    `Deleted by: ${knownActor?.display || "Unknown (not supplied by WhatsApp)"}\n`
+                : "") +
             `Chat: ${event.chat}\nSender: ${sender.display}\n` +
             `Timestamp: ${timestampText(row?.original, event.timestamp)}\n` +
             `Original: ${textOf(message)}` +
@@ -109,7 +124,7 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
             // Notify immediately, before slow media download/upload or metadata lookups.
             await socket.sendMessage(target, {
                 text: alert,
-                ...(sender.mention ? { mentions: [sender.mention] } : {}),
+                mentions: [...new Set([sender.mention, knownActor?.mention].filter(Boolean))],
             });
             event.alertSent = true;
             archive.db.prepare("UPDATE deliveries SET data = ? WHERE key = ?")
@@ -135,6 +150,11 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         archive.complete(job.key);
     }
     async function flush() {
+        // Expire RAM while disconnected too; durable retry originals stay on disk.
+        if (Date.now() - lastMemoryCleanup >= 60000) {
+            lastMemoryCleanup = Date.now();
+            archive.pruneMemory();
+        }
         if (stopped || !online) return Promise.resolve();
         for (const job of archive.due()) {
             if (active.size >= 4) break;
@@ -157,13 +177,16 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
     const upsert = ({ messages = [] }) => {
         try {
             // Capture the ENTIRE batch before handling any delete/edit in it.
+            // No SQLite or media work may precede whole-batch memory capture.
+            for (const msg of messages) archive.remember(msg);
             for (const msg of messages) capture(msg);
             for (const msg of messages) {
                 const protocol = unwrap(msg.message)?.protocolMessage;
                 if (protocol?.type !== 0 && protocol?.type !== 14) continue;
-                const key = { ...protocol.key, remoteJid: protocol.key?.remoteJid || msg.key.remoteJid };
+                const key = { ...protocol.key, remoteJid: protocol.key?.remoteJid || msg.key?.remoteJid };
                 queue(protocol.type === 0 ? "delete" : "edit", key, unwrap(protocol.editedMessage),
-                    protocol.timestampMs ? Math.floor(Number(protocol.timestampMs) / 1000) : msg.messageTimestamp);
+                    protocol.timestampMs ? Math.floor(Number(protocol.timestampMs) / 1000) : msg.messageTimestamp,
+                    msg.key);
             }
             startDownloads();
             pump();
@@ -180,8 +203,10 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
                 else if (entry.update?.message) {
                     const message = unwrap(entry.update.message);
                     const protocol = message?.protocolMessage;
-                    if (protocol?.type === 0) queue("delete", protocol.key || entry.key);
-                    else if (protocol?.type === 14) queue("edit", protocol.key || entry.key, unwrap(protocol.editedMessage),
+                    const key = { ...entry.key, ...protocol?.key,
+                        remoteJid: entry.key?.remoteJid || protocol?.key?.remoteJid };
+                    if (protocol?.type === 0) queue("delete", key);
+                    else if (protocol?.type === 14) queue("edit", key, unwrap(protocol.editedMessage),
                         protocol.timestampMs ? Math.floor(Number(protocol.timestampMs) / 1000) : entry.update.messageTimestamp);
                     else if (!protocol) queue("edit", entry.key, message, entry.update.messageTimestamp);
                 }

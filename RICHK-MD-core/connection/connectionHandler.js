@@ -112,6 +112,10 @@ const setupConnectionHandler = (
 
         if (connection === "close") {
             isOpen = false;
+            if (Gifted.maintenanceRestarting) {
+                console.info("[WhatsApp] Maintenance restart; saved login retained.");
+                return;
+            }
             const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
             console.log(`Connection closed due to: ${reason}`);
 

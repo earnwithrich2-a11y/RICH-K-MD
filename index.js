@@ -285,18 +285,14 @@ async function startGifted() {
         };
 
         Gifted = giftedConnect(socketConfig);
+        Gifted.prepareForMaintenanceRestart = async () => { await saveCreds(); };
         attachCommandDiagnostics(Gifted);
         persistOwnOutgoingMessages(Gifted, store, socketConfig.userDevicesCache);
         installBranding(Gifted);
         menuPromo ||= new MenuPromo(path.join(sessionDir, "menu-promos.db"));
         trackSelfChatDelivery(Gifted);
-        store.bind(Gifted.ev);
-
-        Gifted.ev.process(async (events) => {
-            if (events["creds.update"]) await saveCreds();
-        });
-
-        setupAutoReact(Gifted);
+        // Recovery captures the entire batch in RAM before the general
+        // SQLite store or any command/automation listener touches it.
         recoveryArchive ||= new RecoveryArchive(path.join(sessionDir, "recovery"));
         installMessageRecovery(Gifted, {
             archive: recoveryArchive,
@@ -304,6 +300,13 @@ async function startGifted() {
             download: downloadMediaMessage,
             revokeType: WAMessageStubType.REVOKE,
         });
+        store.bind(Gifted.ev);
+
+        Gifted.ev.process(async (events) => {
+            if (events["creds.update"]) await saveCreds();
+        });
+
+        setupAutoReact(Gifted);
         setupAutoBio(Gifted);
         setupAntiCall(Gifted);
         setupNewsletterReact(Gifted);
@@ -662,6 +665,7 @@ function setupCommandHandler(Gifted) {
         if (isOwnMessage && !isCommand) return;
 
         const gmd = isCommand && command ? findCommand(command) : null;
+        const isMaintenanceCommand = gmd?.maintenance === true;
         const bodyCmd = findBodyCommand(body);
         if (isCommand) {
             Gifted.commandDiagnostics?.mark("commandsRecognized");
@@ -696,7 +700,7 @@ function setupCommandHandler(Gifted) {
             String(settings.BOT_PAUSED || "false").toLowerCase() === "true";
         const isOwnerPauseCommand =
             gmd?.pattern === "pause" && isSuperUser;
-        if (botPaused && !isOwnerPauseCommand) return;
+        if (botPaused && !isOwnerPauseCommand && !isMaintenanceCommand) return;
 
         const isCurrentChannelJid =
             isCommand && canShowCurrentChannelJid(from, gmd?.pattern, args.join(" "));
@@ -705,12 +709,13 @@ function setupCommandHandler(Gifted) {
             !(
                 settings.MODE?.toLowerCase() === "private" &&
                 !isSuperUser &&
+                !isMaintenanceCommand &&
                 !isCurrentChannelJid
             );
 
         if (commandAllowed && !canReactImmediately) startCommandReaction();
 
-        if (settings.AUTO_BLOCK && sender && !isSuperUser && !isGroup && !isCurrentChannelJid) {
+        if (settings.AUTO_BLOCK && sender && !isSuperUser && !isGroup && !isCurrentChannelJid && !isMaintenanceCommand) {
             const countryCodes = settings.AUTO_BLOCK.split(",").map((code) =>
                 code.trim(),
             );
@@ -739,7 +744,7 @@ function setupCommandHandler(Gifted) {
             );
         }
 
-        if (bodyCmd && bodyCmd.function) {
+        if (bodyCmd && bodyCmd.function && !isMaintenanceCommand) {
             if (settings.MODE?.toLowerCase() === "private" && !isSuperUser)
                 return;
             try {
@@ -787,7 +792,7 @@ function setupCommandHandler(Gifted) {
         if (isCommand && command) {
             if (!gmd) return;
 
-            if (settings.MODE?.toLowerCase() === "private" && !isSuperUser && !isCurrentChannelJid)
+            if (settings.MODE?.toLowerCase() === "private" && !isSuperUser && !isCurrentChannelJid && !isMaintenanceCommand)
                 return;
 
             try {
@@ -992,6 +997,7 @@ function buildContext(ms, settings, helpers, data) {
         botCaption: ["menu", "settings"].includes(data.command) ? settings.CAPTION : "",
         botVersion: settings.VERSION,
         ownerNumber: settings.OWNER_NUMBER,
+        sudoNumbers: settings.SUDO_NUMBERS || "",
         ownerName: settings.OWNER_NAME,
         botName: settings.BOT_NAME,
         botRepo: settings.BOT_REPO,

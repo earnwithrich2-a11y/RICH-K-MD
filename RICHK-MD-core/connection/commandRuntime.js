@@ -36,25 +36,16 @@ async function runWithPresence(socket, chat, command, work) {
 }
 
 function serviceUnavailable() {
-    return "╭─ ⚡ RICH-K-MD\n│ Service momentarily unavailable\n╰─────────────────\n\nSorry, this service couldn't complete your request right now. Please try again shortly.\n\n─ RICH-K-MD";
+    return "Service momentarily unavailable\n\nSorry, this service couldn't complete your request right now. Please try again shortly.";
 }
 
-// Cosmetic framing only: never alter control packets, forwarded originals,
-// copyable URLs/code, binary media or machine-readable command results.
+// Compatibility exports: command results are now sent without cosmetic framing.
 function premiumText(text) {
-    if (typeof text !== "string" || !text.trim() ||
-        /╭[^\n]*RICH[-\s]*K[-\s]*MD/i.test(text) ||
-        /^(?:https?:\/\/\S+|```[\s\S]*|[{\[][\s\S]*)$/.test(text.trim())) return text;
-    return `╭─ ⚡ RICH-K-MD\n╰─────────────────\n\n${text}\n\n─ RICH-K-MD`;
+    return text;
 }
 
 function premiumContent(content) {
-    if (!content || typeof content !== "object" || content.react || content.delete ||
-        content.forward || content.protocolMessage || content.edit) return content;
-    const result = { ...content };
-    if (typeof result.text === "string") result.text = premiumText(result.text);
-    if (typeof result.caption === "string") result.caption = premiumText(result.caption);
-    return result;
+    return content;
 }
 
 module.exports = { needsGroupMetadata, runWithPresence, serviceUnavailable, premiumText, premiumContent };

@@ -33,7 +33,7 @@ test("exact outgoing menu/settings sends the exact extra promo to the original p
     assert.equal(await p.maybeSend(s, "menu", source()), true);
     assert.equal(s.sent.length, 2);
     assert.deepEqual(s.sent.map(args => args[0]), [peer, peer]);
-    assert.match(s.sent[0][1].text, /RICH-K-MD[\s\S]*normal menu/);
+    assert.equal(s.sent[0][1].text, "normal menu");
     assert.equal(s.sent[1][1].text, PROMO_MESSAGE);
 });
 
@@ -124,7 +124,7 @@ test("regular text, media captions and previews are clean without changing resul
     };
     await runCommandOutput("tiktok", { FOOTER }, () => s.sendMessage(peer, media));
     const result = s.sent[0][1];
-    assert.match(result.caption, /^╭─ ⚡ RICH-K-MD\n[\s\S]*\nResult\n[\s\S]*─ RICH-K-MD$/);
+    assert.equal(result.caption, "Result");
     assert.equal(result.video, bytes);
     assert.equal(result.contextInfo.externalAdReply, undefined);
     assert.equal(result.contextInfo.forwardedNewsletterMessageInfo, undefined);
@@ -148,7 +148,7 @@ test("no clean command creates additional footer/promo messages; concurrent menu
         runCommandOutput("sticker", { FOOTER }, () => s.sendMessage(peer, { sticker: Buffer.from("sticker") })),
     ]);
     assert.equal(s.sent.length, 3);
-    assert.match(s.sent.find(args => args[1].text?.includes("Answer"))[1].text, /RICH-K-MD/);
+    assert.equal(s.sent.find(args => args[1].text?.includes("Answer"))[1].text, "Answer");
     assert.ok(s.sent.find(args => args[1].text?.includes("Menu"))[1].text.includes(`Menu\n${FOOTER}`));
 });
 

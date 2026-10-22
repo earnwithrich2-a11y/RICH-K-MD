@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { needsGroupMetadata, runWithPresence, premiumText, premiumContent } = require("../RICHK-MD-core/connection/commandRuntime");
+const { needsGroupMetadata, runWithPresence, premiumText, premiumContent, serviceUnavailable } = require("../RICHK-MD-core/connection/commandRuntime");
 const { performancePanel } = require("../RICHK-MD-core/connection/performanceStats");
 
 function loadPlugin(file) {
@@ -58,13 +58,19 @@ test("live performance shows measured latency, uptime and used RAM rather than a
     assert.match(text, /👑 Bot Name: RICH-K-MD/);
 });
 
-test("premium framing is idempotent and preserves machine-readable results and controls", () => {
-    assert.equal(premiumText(premiumText("hello")), premiumText("hello"));
+test("command results, captions, machine-readable results and controls remain unwrapped", () => {
+    assert.equal(premiumText("hello"), "hello");
     for (const raw of ["https://example.com/file", '{"value":true}', "```js\nx()\n```"]) {
         assert.equal(premiumText(raw), raw);
     }
     for (const control of [{ react: {} }, { delete: {} }, { forward: {} }, { edit: {}, text: "edit" }]) {
         assert.equal(premiumContent(control), control);
+    }
+    const media = { image: Buffer.from("image"), caption: "A sweet message" };
+    assert.equal(premiumContent(media), media);
+    assert.equal(premiumContent({ text: "A quote" }).text, "A quote");
+    for (const result of [serviceUnavailable(), performancePanel()]) {
+        assert.doesNotMatch(result, /╭─ ⚡ RICH-K-MD|╰─────────────────|^─ RICH-K-MD$/m);
     }
 });
 

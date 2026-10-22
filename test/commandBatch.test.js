@@ -8,7 +8,8 @@ const { makeEventBuffer } = require("gifted-baileys/lib/Utils/event-buffer");
 const { serializeMessage, standardizeJid } = require("../RICHK-MD-core/connection/serializer");
 
 function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(), {
-    realSerializer = false, mode = "public", ownerNumber = "", echoReplies = false, beforeReply,
+    realSerializer = false, mode = "public", ownerNumber = "", echoReplies = false, beforeReply, prefix = ".",
+    maintenanceService, settingsOverride = {},
 } = {}) {
     const source = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
     const start = source.indexOf("function setupCommandHandler(");
@@ -17,7 +18,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
     const replies = [];
     const reactions = [];
     let reads = 0;
-    const settings = { PREFIX: ".", MODE: mode, BOT_PAUSED: "false", OWNER_NUMBER: ownerNumber };
+    const settings = { PREFIX: prefix, MODE: mode, BOT_PAUSED: "false", OWNER_NUMBER: ownerNumber, ...settingsOverride };
     const setup = vm.runInNewContext(
         `(() => { ${source.slice(start, end)} return setupCommandHandler; })()`,
         {
@@ -52,7 +53,11 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
             },
             findCommand: (pattern) => ({
                 pattern,
+                ...(maintenanceService && ["restart", "update"].includes(pattern) ? { maintenance: true } : {}),
                 async function(from, socket, context) {
+                    if (maintenanceService && ["restart", "update"].includes(pattern)) {
+                        return maintenanceService.run(pattern, socket, context);
+                    }
                     calls.push(context.fixtureId);
                     if (beforeReply) await beforeReply(context);
                     await socket.sendMessage(from, { text: `reply:${context.fixtureId}` });
@@ -63,9 +68,14 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
             getSudoNumbers: async () => [],
             canShowCurrentChannelJid: () => false,
             findBodyCommand: () => null,
-            createHelpers: () => ({}),
+            createHelpers: (socket, _ms, from) => ({ reply: text => socket.sendMessage(from, { text }) }),
             setupGiftedHelpers() {},
-            buildContext: (ms) => ({ fixtureId: ms.key.id }),
+            buildContext: (ms, currentSettings, helpers, data) => ({
+                fixtureId: ms.key.id, m: ms, ...helpers, ...data,
+                ownerNumber: currentSettings.OWNER_NUMBER,
+                sudoNumbers: currentSettings.SUDO_NUMBERS,
+                getSudoNumbers: async () => [],
+            }),
         },
     );
     const socket = {
@@ -105,6 +115,24 @@ function message(id, body = ".ping") {
         message: { conversation: body },
     };
 }
+
+test("private/paused mode still returns the exact maintenance denial to non-owners", async () => {
+    const { createMaintenanceService, DENIED } = require("../RICHK-MD-core/connection/maintenance");
+    const service = createMaintenanceService({
+        run: async () => { throw Error("Unauthorized process execution"); },
+        exit: () => { throw Error("Unauthorized exit"); },
+    });
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        realSerializer: true, ownerNumber: "15550000001", maintenanceService: service,
+        settingsOverride: { MODE: "private", BOT_PAUSED: "true", AUTO_BLOCK: "1555" },
+    });
+    for (const command of ["restart", "update"]) {
+        const ms = message(`denied-${command}`, `.${command}`);
+        Object.assign(ms.key, { fromMe: false, remoteJid: "15550000099@s.whatsapp.net" });
+        await f.receive({ messages: [ms], type: "notify" });
+    }
+    assert.deepEqual(f.replies.map(reply => reply.payload.text), [DENIED, DENIED]);
+});
 
 test("human own-account commands execute in self-chat, peer chats and groups in either mode", async () => {
     for (const mode of ["public", "private"]) {
@@ -147,6 +175,23 @@ test("fromMe commands marked by Baileys reach self-chat and device-suffixed peer
 
     assert.deepEqual(f.calls, routes.map((_, index) => `self-command-${index}`));
     assert.deepEqual(f.replies.map(reply => reply.from), routes.map(([, , destination]) => destination));
+});
+
+test("self-chat commands use dot, exclamation or a configured multicharacter prefix without echo loops", async () => {
+    for (const prefix of [".", "!", "rk!"]) {
+        const f = dispatcherHarness(false, new EventEmitter(), {
+            realSerializer: true, mode: "private", prefix,
+        });
+        const ms = message(`3EB0-human-${prefix}`, `${prefix}ping`);
+        ms.key.remoteJid = "synthetic-bot@s.whatsapp.net";
+        ms.isBaileys = true;
+        await f.receive({ messages: [ms], type: "notify" });
+        assert.deepEqual(f.calls, [ms.key.id]);
+        const automated = await f.socket.sendMessage(ms.key.remoteJid, { text: `${prefix}ping` });
+        await f.receive({ messages: [automated], type: "notify" });
+        await f.receive({ messages: [message(`plain-own-${prefix}`, "plain response")], type: "notify" });
+        assert.equal(f.calls.length, 1);
+    }
 });
 
 test("incoming owner commands delivered as fresh append events are allowed in private mode", async () => {

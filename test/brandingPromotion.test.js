@@ -1,9 +1,25 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { FOOTER, cleanContent, installBranding, runCommandOutput } = require("../RICHK-MD-core/branding");
-const { premiumText } = require("../RICHK-MD-core/connection/commandRuntime");
 const { EventEmitter } = require("events");
 const { restartDelay, supervise } = require("../scripts/run-bot");
+
+test("all command families send plain result text and media captions without automatic branding", async () => {
+    const sends = [];
+    const socket = {
+        sendMessage: async (_jid, content) => sends.push(content),
+        relayMessage: async () => {},
+    };
+    installBranding(socket);
+    for (const command of ["love", "goodnight", "goodmorning", "quote", "info", "menu", "settings", "update", "updt"]) {
+        await runCommandOutput(command, {}, async () => {
+            await socket.sendMessage("chat", { text: "Just the result." });
+            await socket.sendMessage("chat", { image: Buffer.from("image"), caption: "Just the caption." });
+        });
+        assert.equal(sends.at(-2).text, "Just the result.");
+        assert.equal(sends.at(-1).caption, "Just the caption.");
+    }
+});
 
 test("regular results lose promotional footers and menus, without modifying cached originals", async () => {
     const sends = [], relays = [];
@@ -23,7 +39,7 @@ test("regular results lose promotional footers and menus, without modifying cach
         });
     });
     assert.deepEqual([sends[0].text, sends[1].text, sends[2].caption, sends[3].forward.message.conversation],
-        [premiumText("hello"), premiumText("hello"), premiumText("caption"), "original"]);
+        ["hello", "hello", "caption", "original"]);
     assert.equal(source.message.conversation, `original\n${FOOTER}`);
     assert.equal(relays[0].viewOnceMessage.message.interactiveMessage.footer, undefined);
 });
