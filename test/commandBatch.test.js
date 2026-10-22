@@ -8,7 +8,7 @@ const { makeEventBuffer } = require("gifted-baileys/lib/Utils/event-buffer");
 const { serializeMessage, standardizeJid } = require("../RICHK-MD-core/connection/serializer");
 
 function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(), {
-    realSerializer = false, mode = "public", ownerNumber = "", echoReplies = false, beforeReply,
+    realSerializer = false, mode = "public", ownerNumber = "", echoReplies = false, beforeReply, prefix = ".",
 } = {}) {
     const source = fs.readFileSync(path.join(__dirname, "../index.js"), "utf8");
     const start = source.indexOf("function setupCommandHandler(");
@@ -17,7 +17,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
     const replies = [];
     const reactions = [];
     let reads = 0;
-    const settings = { PREFIX: ".", MODE: mode, BOT_PAUSED: "false", OWNER_NUMBER: ownerNumber };
+    const settings = { PREFIX: prefix, MODE: mode, BOT_PAUSED: "false", OWNER_NUMBER: ownerNumber };
     const setup = vm.runInNewContext(
         `(() => { ${source.slice(start, end)} return setupCommandHandler; })()`,
         {
@@ -147,6 +147,23 @@ test("fromMe commands marked by Baileys reach self-chat and device-suffixed peer
 
     assert.deepEqual(f.calls, routes.map((_, index) => `self-command-${index}`));
     assert.deepEqual(f.replies.map(reply => reply.from), routes.map(([, , destination]) => destination));
+});
+
+test("self-chat commands use dot, exclamation or a configured multicharacter prefix without echo loops", async () => {
+    for (const prefix of [".", "!", "rk!"]) {
+        const f = dispatcherHarness(false, new EventEmitter(), {
+            realSerializer: true, mode: "private", prefix,
+        });
+        const ms = message(`3EB0-human-${prefix}`, `${prefix}ping`);
+        ms.key.remoteJid = "synthetic-bot@s.whatsapp.net";
+        ms.isBaileys = true;
+        await f.receive({ messages: [ms], type: "notify" });
+        assert.deepEqual(f.calls, [ms.key.id]);
+        const automated = await f.socket.sendMessage(ms.key.remoteJid, { text: `${prefix}ping` });
+        await f.receive({ messages: [automated], type: "notify" });
+        await f.receive({ messages: [message(`plain-own-${prefix}`, "plain response")], type: "notify" });
+        assert.equal(f.calls.length, 1);
+    }
 });
 
 test("incoming owner commands delivered as fresh append events are allowed in private mode", async () => {

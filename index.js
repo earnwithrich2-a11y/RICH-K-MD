@@ -290,13 +290,8 @@ async function startGifted() {
         installBranding(Gifted);
         menuPromo ||= new MenuPromo(path.join(sessionDir, "menu-promos.db"));
         trackSelfChatDelivery(Gifted);
-        store.bind(Gifted.ev);
-
-        Gifted.ev.process(async (events) => {
-            if (events["creds.update"]) await saveCreds();
-        });
-
-        setupAutoReact(Gifted);
+        // Recovery captures the entire batch in RAM before the general
+        // SQLite store or any command/automation listener touches it.
         recoveryArchive ||= new RecoveryArchive(path.join(sessionDir, "recovery"));
         installMessageRecovery(Gifted, {
             archive: recoveryArchive,
@@ -304,6 +299,13 @@ async function startGifted() {
             download: downloadMediaMessage,
             revokeType: WAMessageStubType.REVOKE,
         });
+        store.bind(Gifted.ev);
+
+        Gifted.ev.process(async (events) => {
+            if (events["creds.update"]) await saveCreds();
+        });
+
+        setupAutoReact(Gifted);
         setupAutoBio(Gifted);
         setupAntiCall(Gifted);
         setupNewsletterReact(Gifted);

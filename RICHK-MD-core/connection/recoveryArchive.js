@@ -5,13 +5,15 @@ const crypto = require("crypto");
 const { safeStringify, safeParse } = require("../database/messageStore");
 
 const RETENTION_MS = 7 * 86400000;
+const MEMORY_RETENTION_MS = 2 * 60 * 60 * 1000;
 const MAX_MEDIA_BYTES = 32 * 1024 * 1024;
 const MAX_ARCHIVE_BYTES = 512 * 1024 * 1024;
 
 function unwrap(message) {
     for (let i = 0; message && i < 8; i++) {
         const inner = message.ephemeralMessage || message.viewOnceMessage ||
-            message.viewOnceMessageV2 || message.documentWithCaptionMessage || message.editedMessage;
+            message.viewOnceMessageV2 || message.viewOnceMessageV2Extension ||
+            message.documentWithCaptionMessage || message.deviceSentMessage || message.editedMessage;
         if (!inner?.message) break;
         message = inner.message;
     }
@@ -42,31 +44,75 @@ class RecoveryArchive {
         this.reservedBytes = 0;
     }
     key(chat, id) { return `${chat}\0${id}`; }
-    capture(msg) {
-        const message = unwrap(msg.message);
-        if (!msg.key?.id || !msg.key.remoteJid || !message || message.protocolMessage ||
+    cached(chat, id, now = Date.now()) {
+        const chats = this.memory.get(id);
+        const row = chats?.get(chat);
+        if (row && now - row.cachedAt >= MEMORY_RETENTION_MS) {
+            this.forgetMemory(chat, id);
+            return null;
+        }
+        return row || null;
+    }
+    forgetMemory(chat, id) {
+        const chats = this.memory.get(id);
+        chats?.delete(chat);
+        if (chats?.size === 0) this.memory.delete(id);
+    }
+    pruneMemory(now = Date.now()) {
+        for (const [id, chats] of this.memory) {
+            for (const [chat, row] of chats) {
+                if (now - row.cachedAt >= MEMORY_RETENTION_MS) this.forgetMemory(chat, id);
+            }
+        }
+    }
+    remember(msg) {
+        const message = unwrap(msg?.message);
+        if (!msg?.key?.id || !msg.key.remoteJid || !message || message.protocolMessage ||
             msg.key.fromMe || msg.key.remoteJid === "status@broadcast") return;
-        const key = this.key(msg.key.remoteJid, msg.key.id);
+        const { id, remoteJid: chat } = msg.key;
+        const existing = this.cached(chat, id);
+        if (existing) return existing;
         // First write wins: edits/retransmissions must not replace the original.
         const copy = safeParse(safeStringify({ ...msg, message }));
-        this.db.prepare("INSERT OR IGNORE INTO originals VALUES (?, ?, ?, ?, ?, NULL)")
-            .run(key, msg.key.remoteJid, msg.key.id, safeStringify(copy), Date.now());
-        if (!this.memory.has(key)) {
-            const row = this.db.prepare("SELECT data FROM originals WHERE key = ?").get(key);
-            this.memory.set(key, safeParse(row.data));
-            if (this.memory.size > 10000) this.memory.delete(this.memory.keys().next().value);
+        const now = Date.now();
+        const row = {
+            key: this.key(chat, id), chat, id, original: copy,
+            data: safeStringify(copy), created: now, cachedAt: now, media: null,
+        };
+        // Primary index is the message ID. Keep a chat sub-index so colliding
+        // IDs cannot recover content from an unrelated conversation.
+        if (!this.memory.has(id)) this.memory.set(id, new Map());
+        this.memory.get(id).set(chat, row);
+        return row;
+    }
+    capture(msg) {
+        // RAM must be populated even when the subsequent disk write fails.
+        const row = this.remember(msg);
+        if (!row) return;
+        const result = this.db.prepare("INSERT OR IGNORE INTO originals VALUES (?, ?, ?, ?, ?, NULL)")
+            .run(row.key, row.chat, row.id, row.data, row.created);
+        if (!result.changes) {
+            const saved = this.db.prepare("SELECT * FROM originals WHERE key = ?").get(row.key);
+            Object.assign(row, saved, { original: safeParse(saved.data) });
         }
-        return key;
+        return row.key;
     }
     find(chat, id) {
+        const cached = this.cached(chat, id);
+        if (cached) return cached;
+        for (const row of this.memory.get(id)?.values() || []) {
+            if (row.original.key.remoteJidAlt === chat && this.cached(row.chat, id)) return row;
+        }
         const key = this.key(chat, id);
         const row = this.db.prepare("SELECT * FROM originals WHERE key = ?").get(key) ||
-            this.db.prepare("SELECT * FROM originals WHERE id = ? ORDER BY created DESC LIMIT 1").get(id);
-        return row ? { ...row, original: this.memory.get(row.key) || safeParse(row.data) } : null;
+            this.db.prepare("SELECT * FROM originals WHERE id = ?").all(id)
+                .find(saved => safeParse(saved.data).key.remoteJidAlt === chat);
+        return row ? { ...row, original: safeParse(row.data) } : null;
     }
     async cacheMedia(row, download) {
         if (!row || row.media) return;
-        if (this.db.prepare("SELECT media FROM originals WHERE key = ?").get(row.key)?.media) return;
+        const savedMedia = this.db.prepare("SELECT media FROM originals WHERE key = ?").get(row.key)?.media;
+        if (savedMedia) { row.media = savedMedia; return; }
         if (this.downloads.has(row.key)) return this.downloads.get(row.key);
         const original = row.original;
         const media = ["imageMessage", "videoMessage", "audioMessage", "stickerMessage", "documentMessage"]
@@ -103,6 +149,9 @@ class RecoveryArchive {
                 }), file, { signal: AbortSignal.timeout(20000) });
                 fs.renameSync(temp, filename);
                 this.db.prepare("UPDATE originals SET media = ? WHERE key = ?").run(name, row.key);
+                row.media = name;
+                const cached = this.cached(row.chat, row.id);
+                if (cached) cached.media = name;
             } finally {
                 if (fs.existsSync(temp)) fs.unlinkSync(temp);
             }
@@ -127,22 +176,23 @@ class RecoveryArchive {
             .run(Date.now() + Math.min(60000, 1000 * 2 ** Math.min(attempts, 6)), key);
     }
     cleanup() {
+        this.pruneMemory();
         const pending = new Set(this.db.prepare("SELECT data FROM deliveries WHERE done = 0").all()
             .map(row => safeParse(row.data).originalKey));
         let total = fs.readdirSync(this.dir).filter(name => /^[a-f0-9]{64}$/.test(name))
             .reduce((sum, name) => sum + fs.statSync(path.join(this.dir, name)).size, 0);
-        for (const row of this.db.prepare("SELECT key, media, created FROM originals ORDER BY created").all()) {
+        for (const row of this.db.prepare("SELECT key, chat, id, media, created FROM originals ORDER BY created").all()) {
             if (pending.has(row.key)) continue;
             if (row.created >= Date.now() - RETENTION_MS && total <= MAX_ARCHIVE_BYTES) continue;
             if (row.media) {
                 const file = path.join(this.dir, row.media);
                 if (fs.existsSync(file)) { total -= fs.statSync(file).size; fs.unlinkSync(file); }
             }
-            this.memory.delete(row.key);
+            this.forgetMemory(row.chat, row.id);
             this.db.prepare("DELETE FROM originals WHERE key = ?").run(row.key);
         }
         this.db.prepare("DELETE FROM deliveries WHERE done = 1 AND created < ?").run(Date.now() - RETENTION_MS);
     }
 }
 
-module.exports = { RecoveryArchive, unwrap };
+module.exports = { RecoveryArchive, unwrap, MEMORY_RETENTION_MS };

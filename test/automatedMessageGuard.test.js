@@ -40,3 +40,19 @@ test("remembered IDs are bounded and isolated per socket", async () => {
     assert.equal(check({ key: { fromMe: true, id: "two" } }), true);
     assert.equal(other({ key: { fromMe: true, id: "two" } }), false);
 });
+
+test("a socket reconnect for the same account still recognizes actual automated replies", async () => {
+    const makeSocket = id => ({
+        user: { id },
+        sendMessage: async (jid, content, options) => ({
+            key: { id: options.messageId, fromMe: true, remoteJid: jid }, message: content,
+        }),
+    });
+    const previous = makeSocket("18880000001:7@s.whatsapp.net");
+    installAutomatedMessageGuard(previous);
+    const sent = await previous.sendMessage("18880000001@s.whatsapp.net", { conversation: ".ping" });
+    const reconnected = makeSocket("18880000001:12@s.whatsapp.net");
+    const check = installAutomatedMessageGuard(reconnected);
+    assert.equal(check(sent), true);
+    assert.equal(check({ key: { fromMe: true, id: "BAE5-human-reconnect" }, isBaileys: true }), false);
+});

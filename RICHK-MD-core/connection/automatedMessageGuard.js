@@ -1,12 +1,18 @@
-const { generateMessageIDV2 } = require("gifted-baileys");
+const { generateMessageIDV2, jidNormalizedUser } = require("gifted-baileys");
 
 const guards = new WeakMap();
+const accounts = new Map();
 
 // Do not classify messages by SDK-looking ID prefixes: WhatsApp's human
 // clients can use those too. Remember only sends made by this socket.
 function installAutomatedMessageGuard(socket, maxRemembered = 20000) {
     if (guards.has(socket)) return guards.get(socket);
-    const automatedIds = new Set();
+    const account = jidNormalizedUser(socket.user?.id || socket.authState?.creds?.me?.id || "");
+    const automatedIds = (account && accounts.get(account)) || new Set();
+    if (account) {
+        accounts.set(account, automatedIds);
+        while (accounts.size > 4) accounts.delete(accounts.keys().next().value);
+    }
     const remember = (id) => {
         if (!id) return;
         automatedIds.add(id);
