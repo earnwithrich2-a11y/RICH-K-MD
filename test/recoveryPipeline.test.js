@@ -176,6 +176,109 @@ test("protocol revoke updates with an ID-only key inherit their chat from the SD
     assert.match(f.sent[0].content.text, /Original: original text/);
 });
 
+test("native owner-originated revoke updates recover a known incoming original, not bot-sent content", async t => {
+    const f = fixture(t);
+    f.socket.ev.emit("messages.upsert", { messages: [original()] });
+    f.socket.ev.emit("messages.update", [{
+        // The SDK copies the deleter's fromMe flag onto the update key.
+        key: { ...original().key, fromMe: true },
+        update: { message: null, messageStubType: 1,
+            key: { remoteJid: chat, id: "owner-revoke", fromMe: true } },
+    }]);
+    await f.controller.flush();
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.sent[0].jid, connectedUser);
+    assert.match(f.sent[0].content.text, /Original: original text/);
+    assert.match(f.sent[0].content.text, /Deleted by: @3000/);
+    f.socket.ev.emit("messages.update", [{
+        key: { remoteJid: chat, id: "bot-sent-original", fromMe: true },
+        update: { message: null, messageStubType: 1 },
+    }]);
+    await f.controller.flush();
+    assert.equal(f.sent.length, 1);
+});
+
+test("a transport-supplied alternate address recovers phone originals after a LID switch", async t => {
+    const f = fixture(t);
+    f.socket.ev.emit("messages.upsert", { messages: [original()] });
+    f.archive.memory.clear();
+    const deleted = protocol(0);
+    Object.assign(deleted.key, { remoteJid: "changed-address@lid", remoteJidAlt: chat });
+    deleted.message.protocolMessage.key.remoteJid = "changed-address@lid";
+    f.socket.ev.emit("messages.upsert", { messages: [deleted] });
+    await f.controller.flush();
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.sent[0].jid, connectedUser);
+    assert.match(f.sent[0].content.text, /Original: original text/);
+});
+
+test("protocol payloads cannot use an unverified chat or alternate address to select another original", async t => {
+    const f = fixture(t);
+    f.socket.ev.emit("messages.upsert", { messages: [original()] });
+    const deleted = protocol(0);
+    deleted.key.remoteJid = "unrelated-chat@lid";
+    Object.assign(deleted.message.protocolMessage.key, { remoteJid: chat, remoteJidAlt: chat });
+    f.socket.ev.emit("messages.upsert", { messages: [deleted] });
+    await f.controller.flush();
+    assert.equal(f.sent.length, 1);
+    assert.doesNotMatch(f.sent[0].content.text, /Original: original text/);
+    assert.match(f.sent[0].content.text, /original was not received/);
+});
+
+test("a stalled phone-number lookup cannot prevent the recovery DM", async t => {
+    const f = fixture(t);
+    f.socket.signalRepository.lidMapping.getPNForLID = () => new Promise(() => {});
+    const msg = original("lid-original", { conversation: "recover without phone mapping" }, "peer@lid");
+    const deleted = original("lid-revoke", { protocolMessage: {
+        type: 0, key: { id: msg.key.id, remoteJid: "peer@lid", fromMe: false },
+    } }, "peer@lid");
+    f.socket.ev.emit("messages.upsert", { messages: [msg, deleted] });
+    await f.controller.flush();
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.sent[0].jid, connectedUser);
+    assert.match(f.sent[0].content.text, /recover without phone mapping/);
+    assert.equal(f.archive.due().length, 0);
+});
+
+test("expired media downloads receive the active socket's refresh callback", async t => {
+    let refreshes = 0;
+    const f = fixture(t, {
+        download: async (msg, type, options, context) => {
+            assert.equal(type, "stream");
+            assert.equal(options.options.timeout, 20000);
+            assert.equal(typeof context?.reuploadRequest, "function");
+            const refreshed = await context.reuploadRequest(msg);
+            return Readable.from(refreshed.message.audioMessage.fixtureBytes);
+        },
+    });
+    f.socket.updateMediaMessage = async msg => {
+        refreshes++;
+        return { ...msg, message: { audioMessage: { fixtureBytes: "refreshed original media" } } };
+    };
+    f.socket.ev.emit("messages.upsert", { messages: [
+        original("original", { audioMessage: { ptt: true } }), protocol(0),
+    ] });
+    await f.controller.flush();
+    assert.equal(refreshes, 1);
+    assert.equal(f.sent.length, 2);
+    assert.equal(f.sent[1].jid, connectedUser);
+    assert.equal(f.sent[1].content.ptt, true);
+    assert.equal(fs.readFileSync(f.sent[1].content.audio.url, "utf8"), "refreshed original media");
+});
+
+test("recoveries wait for an authenticated connection and drain to the connected account, not the configured owner", async t => {
+    const f = fixture(t, { initiallyOnline: false });
+    f.socket.ev.emit("messages.upsert", { messages: [original(), protocol(0)] });
+    await f.controller.flush();
+    assert.equal(f.sent.length, 0);
+    assert.equal(f.archive.due().length, 1);
+    f.socket.ev.emit("connection.update", { connection: "open" });
+    await f.controller.flush();
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.sent[0].jid, connectedUser);
+    assert.notEqual(f.sent[0].jid, "2000@s.whatsapp.net");
+});
+
 test("in-chat mode sends group recoveries to their original group", async t => {
     const group = "4000@g.us";
     const f = fixture(t, {
@@ -258,7 +361,7 @@ test("owner alert is sent before stalled media download; unrelated chat still de
     f.socket.ev.emit("messages.upsert", { messages: [original("original", { imageMessage: {} }), protocol(0)] });
     f.socket.ev.emit("messages.upsert", { messages: [
         original("other", { conversation: "other chat" }, "3000@g.us"),
-        original("revoke-other", { protocolMessage: { type: 0, key: { id: "other", remoteJid: "3000@g.us" } } }),
+        original("revoke-other", { protocolMessage: { type: 0, key: { id: "other", remoteJid: "3000@g.us" } } }, "3000@g.us"),
     ] });
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.sent.length, 2);

@@ -36,9 +36,15 @@ async function senderDetails(socket, original, eventKey) {
     let jid = key.participantPn || key.senderPn || key.participantAlt || key.participant ||
         key.remoteJidAlt || key.remoteJid || "";
     if (jid.endsWith("@lid")) {
+        let timer;
         try {
-            jid = await socket.signalRepository?.lidMapping?.getPNForLID(jid) || jid;
+            // Identity enrichment must not hold a recovery notification forever.
+            jid = await Promise.race([
+                Promise.resolve().then(() => socket.signalRepository?.lidMapping?.getPNForLID(jid)),
+                new Promise(resolve => { timer = setTimeout(() => resolve(), 100); }),
+            ]) || jid;
         } catch { /* Use the saved LID when a phone mapping is not available. */ }
+        finally { clearTimeout(timer); }
     }
     const number = jid.endsWith("@s.whatsapp.net")
         ? jid.split("@")[0].split(":")[0].replace(/\D/g, "")
@@ -51,6 +57,18 @@ async function senderDetails(socket, original, eventKey) {
     };
 }
 
+function recoveryKey(originalKey = {}, transportKey = {}) {
+    // Only the authenticated transport envelope may supply a chat alias.
+    // A protocol payload must not select an unrelated conversation's original.
+    const { remoteJidAlt: _untrustedAlias, ...key } = originalKey || {};
+    transportKey ||= {};
+    return {
+        ...key,
+        remoteJid: transportKey.remoteJid || key.remoteJid,
+        ...(transportKey.remoteJidAlt ? { remoteJidAlt: transportKey.remoteJidAlt } : {}),
+    };
+}
+
 function installMessageRecovery(socket, { archive, getSettings, download, revokeType = 1, retryMs = 1000, initiallyOnline = false }) {
     let online = initiallyOnline;
     let stopped = false;
@@ -59,6 +77,12 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
     const active = new Map();
     const downloading = new Set();
     const mediaQueue = new Set();
+    const recoveryDownload = (message, type, options) => download(message, type, options,
+        typeof socket.updateMediaMessage === "function" ? {
+            // Do not log message keys or personal metadata during refresh.
+            logger: { info() {} },
+            reuploadRequest: original => socket.updateMediaMessage(original),
+        } : undefined);
 
     function startDownloads() {
         while (!stopped && downloading.size < 4 && mediaQueue.size) {
@@ -67,7 +91,7 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
             const row = archive.db.prepare("SELECT chat, id FROM originals WHERE key = ?").get(key);
             if (!row) continue;
             downloading.add(key);
-            archive.cacheMedia(archive.find(row.chat, row.id), download)
+            archive.cacheMedia(archive.find(row.chat, row.id), recoveryDownload)
                 .catch(() => console.warn("[Recovery] Early media download failed; recovery will retry."))
                 .finally(() => { downloading.delete(key); startDownloads(); });
         }
@@ -82,14 +106,18 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         if (key && Object.keys(MEDIA).some(type => unwrap(message.message)?.[type])) mediaQueue.add(key);
     }
     function queue(kind, key, edited, timestamp, actorKey) {
-        if (!key?.id || !key.remoteJid || key.fromMe || key.remoteJid === "status@broadcast") return;
-        const row = archive.find(key.remoteJid, key.id);
+        if (!key?.id || !key.remoteJid || key.remoteJid === "status@broadcast") return;
+        const row = archive.find(key.remoteJid, key.id) ||
+            (key.remoteJidAlt ? archive.find(key.remoteJidAlt, key.id) : null);
+        // SDK revoke updates describe the deleter, not necessarily the author.
+        // fromMe is safe to ignore only when no known incoming original exists.
+        if (row?.original.key?.fromMe || (key.fromMe && !row)) return;
         const fingerprint = kind === "edit"
             ? crypto.createHash("sha256").update(`${timestamp || ""}:${safeStringify(edited)}`).digest("hex") : "";
         const originalKey = row?.key || archive.key(key.remoteJid, key.id);
         archive.enqueue({
             key: `${originalKey}\0${kind}\0${fingerprint}`,
-            originalKey, chat: key.remoteJid, id: key.id, kind, edited,
+            originalKey, chat: row?.chat || key.remoteJid, id: key.id, kind, edited,
             eventKey: key, actorKey, timestamp, alertSent: false,
         });
     }
@@ -104,11 +132,13 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         const row = archive.find(event.chat, event.id);
         const message = row?.original.message;
         const label = event.kind === "delete" ? "DELETED MESSAGE" : "EDITED MESSAGE";
-        const sender = await senderDetails(socket, row?.original, event.eventKey);
-        const actor = event.kind === "delete" && event.actorKey
-            ? await senderDetails(socket, null, event.actorKey.fromMe
-                ? { remoteJid: connectedUserJid(socket) } : event.actorKey)
-            : null;
+        const [sender, actor] = await Promise.all([
+            senderDetails(socket, row?.original, event.eventKey),
+            event.kind === "delete" && event.actorKey
+                ? senderDetails(socket, null, event.actorKey.fromMe
+                    ? { remoteJid: connectedUserJid(socket) } : event.actorKey)
+                : null,
+        ]);
         const knownActor = actor && !actor.display.endsWith("@g.us") ? actor : null;
         const alert = `*RICH-K-MD • ${label}*\n\n` +
             (event.kind === "delete"
@@ -132,7 +162,7 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         }
         const mediaType = message && Object.keys(MEDIA).find(type => message[type]);
         if (mediaType) {
-            await archive.cacheMedia(row, download);
+            await archive.cacheMedia(row, recoveryDownload);
             const cached = archive.find(event.chat, event.id);
             if (!cached?.media) throw new Error("Original media unavailable");
             const data = message[mediaType];
@@ -183,7 +213,7 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
             for (const msg of messages) {
                 const protocol = unwrap(msg.message)?.protocolMessage;
                 if (protocol?.type !== 0 && protocol?.type !== 14) continue;
-                const key = { ...protocol.key, remoteJid: protocol.key?.remoteJid || msg.key?.remoteJid };
+                const key = recoveryKey(protocol.key, msg.key);
                 queue(protocol.type === 0 ? "delete" : "edit", key, unwrap(protocol.editedMessage),
                     protocol.timestampMs ? Math.floor(Number(protocol.timestampMs) / 1000) : msg.messageTimestamp,
                     msg.key);
@@ -198,13 +228,12 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         try {
             for (const entry of updates) {
                 if (entry.update?.messageStubType === revokeType) {
-                    queue("delete", entry.key, undefined, entry.update.messageTimestamp);
+                    queue("delete", entry.key, undefined, entry.update.messageTimestamp, entry.update.key);
                 }
                 else if (entry.update?.message) {
                     const message = unwrap(entry.update.message);
                     const protocol = message?.protocolMessage;
-                    const key = { ...entry.key, ...protocol?.key,
-                        remoteJid: entry.key?.remoteJid || protocol?.key?.remoteJid };
+                    const key = recoveryKey({ ...entry.key, ...protocol?.key }, entry.key);
                     if (protocol?.type === 0) queue("delete", key);
                     else if (protocol?.type === 14) queue("edit", key, unwrap(protocol.editedMessage),
                         protocol.timestampMs ? Math.floor(Number(protocol.timestampMs) / 1000) : entry.update.messageTimestamp);
