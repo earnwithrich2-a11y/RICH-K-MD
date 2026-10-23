@@ -10,7 +10,6 @@ The source is organized into `RICHK-MD-core` (runtime, settings and local data) 
 <summary>GET YOUR SESSION_ID</summary>
 <a href="https://rich-k.onrender.com/"><img src="https://img.shields.io/badge/CLICK%20HERE-green" alt="Pairing Code" width="150"></a>
 
-- Session ID must start with Gifted~
 </details>
 
 (A) HEROKU DEPLOYMENT
