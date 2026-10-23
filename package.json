@@ -33,7 +33,7 @@
     "@ffmpeg-installer/ffmpeg": "1.1.0",
     "@hapi/boom": "10.0.1",
     "@vitalets/google-translate-api": "9.2.1",
-    "@whiskeysockets/baileys": "7.0.0-rc14",
+    "@whiskeysockets/baileys": "npm:bwmxmdbaileys@1.0.0",
     "acrcloud": "1.4.0",
     "adm-zip": "0.6.1",
     "audio-decode": "2.2.3",
