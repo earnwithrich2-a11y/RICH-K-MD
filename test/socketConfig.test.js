@@ -17,6 +17,7 @@ test("socket initializes WhatsApp state needed to decrypt new messages", () => {
     );
 
     assert.equal(config.fireInitQueries, true);
+    assert.equal(config.markOnlineOnConnect, false, "online presence must be explicitly enabled");
     assert.equal(config.syncFullHistory, false);
     assert.equal(typeof config.makeSignalRepository, "function", "bungoma crypto writes require the protected repository");
     assert.equal(config.bufferLiveMessages, false);

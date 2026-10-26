@@ -25,7 +25,7 @@ const createSocketConfig = (version, state, logger) => {
         defaultQueryTimeoutMs: 20000,
         keepAliveIntervalMs: 20000,
         fireInitQueries: true,
-        markOnlineOnConnect: true,
+        markOnlineOnConnect: false,
         syncFullHistory: false,
         bufferLiveMessages: false,
         shouldSyncHistoryMessage: () => false,

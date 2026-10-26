@@ -98,8 +98,10 @@ gmd(
 
 *👁️ VIEW ONCE*
 ▸ *${p}vv* — Reply to a view-once message to save it
+▸ *${p}antiviewonce on/off* — ${formatSettingsStatus(settings.ANTIVIEWONCE)} · Save incoming view-once media to your DM
 
 *📱 STATUS*
+▸ *${p}savestatus* — Reply to a status to save it to your DM
 ▸ *${p}autoviewstatus on/off* — ${formatSettingsStatus(settings.AUTO_READ_STATUS)} · Automatically view statuses
 ▸ *${p}autolikestatus on/off* — ${formatSettingsStatus(settings.AUTO_LIKE_STATUS)} · Automatically like statuses
 ▸ *${p}autoreplystatus on/off* — ${formatSettingsStatus(settings.AUTO_REPLY_STATUS)} · Automatically reply to statuses
@@ -111,6 +113,9 @@ gmd(
 ▸ *${p}autoreply on/off* — ${formatSettingsStatus(settings.AUTO_REPLY)}
 ▸ *${p}autoread all/dm/groups/commands/off* — ${formatSettingsStatus(settings.AUTO_READ_MESSAGES)}
 ▸ *${p}autobio on/off* — ${formatSettingsStatus(settings.AUTO_BIO)}
+▸ *${p}faketyping on/off* — ${settings.DM_PRESENCE === "typing" ? "ON" : "OFF"}
+▸ *${p}fakerecording on/off* — ${settings.DM_PRESENCE === "recording" ? "ON" : "OFF"} · Replaces fake typing
+▸ *${p}alwaysonline on/off* — ${formatSettingsStatus(settings.ALWAYS_ONLINE)}
 
 *🛡️ PROTECTION*
 ▸ *${p}antidelete on/off* — ${formatSettingsStatus(settings.ANTIDELETE)} · Recover deleted messages in your DM
@@ -118,6 +123,7 @@ gmd(
 ▸ *${p}anticall on/off/block/decline* — ${formatSettingsStatus(settings.ANTICALL)}
 ▸ *${p}antilink on/warn/kick/off* — ${groupStatus("ANTILINK")}
 ▸ *${p}lockurl on/off* — ${groupStatus("LOCKURL")} · Only group admins/owner may post links
+▸ *${p}antikick on/off* — ${groupStatus("ANTIKICK")} · Best-effort member restoration while bot stays admin
 ▸ *${p}antibad on/warn/kick/off* — ${groupStatus("ANTIBAD")}
 
 *👥 GROUP*

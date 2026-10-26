@@ -2,11 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Module = require("node:module");
 
-function loadSettingsWithMockDatabase() {
+function loadSettingsWithMockDatabase(seedRows) {
     const settingsPath = require.resolve("../RICHK-MD-core/database/settings");
     delete require.cache[settingsPath];
 
-    const rows = new Map();
+    const rows = seedRows || new Map();
     const model = {
         sync: async () => {},
         destroy: async () => {},
@@ -53,6 +53,33 @@ function loadSettingsWithMockDatabase() {
 async function initialize(settings) {
     await settings.initializeSettings();
 }
+
+test("optional automation starts OFF once without changing saved recovery or group protections", async () => {
+    const settings = loadSettingsWithMockDatabase();
+    // Existing installations already received the older, unrelated public-mode rollout.
+    for (const [key, value] of Object.entries({
+        PUBLIC_RECOVERY_PROMOTION_SETUP: "done", ANTIDELETE: "inchat", ANTI_EDIT: "off",
+        AUTO_READ_STATUS: "true", AUTO_LIKE_STATUS: "true", ANTIVIEWONCE: "indm",
+        DM_PRESENCE: "online", GC_PRESENCE: "typing", MODE: "private",
+    })) {
+        const row = { key, value, save: async () => {} };
+        settings.rows.set(key, row);
+    }
+    await initialize(settings);
+    for (const [key, value] of Object.entries({
+        AUTO_READ_STATUS: "false", AUTO_LIKE_STATUS: "false", ANTIVIEWONCE: "off",
+        AUTO_REACT: "off", AUTO_READ_MESSAGES: "off", ALWAYS_ONLINE: "false",
+        DM_PRESENCE: "offline", GC_PRESENCE: "offline",
+        ANTIDELETE: "inchat", ANTI_EDIT: "off", MODE: "private",
+    })) assert.equal(await settings.getSetting(key), value, key);
+    await settings.setSetting("AUTO_READ_STATUS", "true");
+    await settings.setSetting("ANTIVIEWONCE", "indm");
+    // Simulate a fresh process against the same persistent database.
+    const restarted = loadSettingsWithMockDatabase(settings.rows);
+    await initialize(restarted);
+    assert.equal(await restarted.getSetting("AUTO_READ_STATUS"), "true");
+    assert.equal(await restarted.getSetting("ANTIVIEWONCE"), "indm");
+});
 
 test("public rollout updates persisted private mode, recovery and footer once", async () => {
     const settings = loadSettingsWithMockDatabase();
