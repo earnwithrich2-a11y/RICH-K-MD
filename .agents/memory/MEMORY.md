@@ -12,3 +12,4 @@
 - [Recovery retention](recovery-retention.md) — the two-hour RAM limit must not cancel durable recovery retries or expose originals across chats.
 - [Maintenance safety](maintenance-safety.md) — strict owner/connected/sudo access, no logout or credential replacement, and safe fast-forward-only updates.
 - [Clean command responses](command-output-style.md) — no automatic header/footer frames; update notices use the user's plain, nontechnical wording.
+- [Optional automation safety](optional-automation-policy.md) — OFF defaults and explicit opt-in; preserve working commands and existing recovery/group protections.

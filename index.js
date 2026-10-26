@@ -6,6 +6,9 @@ const { canShowCurrentChannelJid } = require("./RICHK-MD-core/connection/channel
 const { attachCommandDiagnostics } = require("./RICHK-MD-core/connection/commandDiagnostics");
 const { installAutomatedMessageGuard } = require("./RICHK-MD-core/connection/automatedMessageGuard");
 const { extractMessageText } = require("./RICHK-MD-core/connection/serializer");
+const { installOptionalAutomation } = require("./RICHK-MD-core/connection/optionalAutomation");
+const { installAntiKick } = require("./RICHK-MD-core/connection/antiKick");
+const { getGroupSetting } = require("./RICHK-MD-core/database/groupSettings");
 const { getCommandSettings } = require("./RICHK-MD-core/database/settings");
 const { getCachedSudoNumbers } = require("./RICHK-MD-core/database/sudo");
 const { needsGroupMetadata, runWithPresence, serviceUnavailable } = require("./RICHK-MD-core/connection/commandRuntime");
@@ -32,7 +35,6 @@ const {
     delSudo,
     GiftedTechApi,
     GiftedApiKey,
-    GiftedAutoReact,
     GiftedAntiLink,
     GiftedAntibad,
     GiftedAntiGroupMention,
@@ -61,7 +63,6 @@ const {
     createContext,
     createContext2,
     verifyJidState,
-    GiftedPresence,
     syncDatabase,
     initializeSettings,
     initializeGroupSettings,
@@ -306,13 +307,15 @@ async function startGifted() {
             if (events["creds.update"]) await saveCreds();
         });
 
-        setupAutoReact(Gifted);
+        installOptionalAutomation(Gifted, {
+            getSettings: getAllSettings,
+            resolveJid: jid => resolveRealJid(Gifted, jid),
+        });
+        installAntiKick(Gifted, { getSetting: getGroupSetting, getMetadata: getGroupMetadata });
         setupAutoBio(Gifted);
         setupAntiCall(Gifted);
         setupNewsletterReact(Gifted);
-        setupPresence(Gifted);
         setupChatBotAndAntiLink(Gifted);
-        setupStatusHandlers(Gifted);
         setupGroupEventsListeners(Gifted);
 
         setupCommandHandler(Gifted);
@@ -342,46 +345,6 @@ async function startGifted() {
         console.error("Socket initialization error:", error);
         setTimeout(() => startGifted(), 5000);
     }
-}
-
-function setupAutoReact(Gifted) {
-    Gifted.ev.on("messages.upsert", async (mek) => {
-        try {
-            const ms = mek.messages[0];
-            const s = await getAllSettings();
-            const autoReactMode = s.AUTO_REACT || "off";
-
-            if (
-                autoReactMode === "off" ||
-                autoReactMode === "false" ||
-                ms.key.fromMe ||
-                !ms.message ||
-                extractMessageText(ms).startsWith(s.PREFIX || ".")
-            )
-                return;
-
-            const from = ms.key.remoteJid;
-            const isGroup = from?.endsWith("@g.us");
-            const isDm = from?.endsWith("@s.whatsapp.net");
-
-            let shouldReact = false;
-            if (autoReactMode === "all" || autoReactMode === "true") {
-                shouldReact = true;
-            } else if (autoReactMode === "dm" && isDm) {
-                shouldReact = true;
-            } else if (autoReactMode === "groups" && isGroup) {
-                shouldReact = true;
-            }
-
-            if (!shouldReact) return;
-
-            const randomEmoji =
-                emojis[Math.floor(Math.random() * emojis.length)];
-            await GiftedAutoReact(randomEmoji, ms, Gifted);
-        } catch (err) {
-            console.error("Error during auto reaction:", err);
-        }
-    });
 }
 
 function setupAutoBio(Gifted) {
@@ -441,20 +404,6 @@ function setupNewsletterReact(Gifted) {
     });
 }
 
-function setupPresence(Gifted) {
-    Gifted.ev.on("messages.upsert", async ({ messages }) => {
-        if (messages?.length > 0) {
-            await GiftedPresence(Gifted, messages[0].key.remoteJid);
-        }
-    });
-
-    Gifted.ev.on("connection.update", ({ connection }) => {
-        if (connection === "open") {
-            GiftedPresence(Gifted, "status@broadcast");
-        }
-    });
-}
-
 function setupChatBotAndAntiLink(Gifted) {
     const { isMessageEdit } = require("./RICHK-MD-core/groupLinkLock");
     Gifted.ev.on("messages.update", async (updates) => {
@@ -496,76 +445,6 @@ function setupChatBotAndAntiLink(Gifted) {
             }
             await GiftedAntiGroupMention(Gifted, message, getGroupMetadata);
             await handleGameMessage(Gifted, message);
-        }
-    });
-}
-
-function setupStatusHandlers(Gifted) {
-    Gifted.ev.on("messages.upsert", async (mek) => {
-        try {
-            mek = mek.messages[0];
-            if (!mek || !mek.message) return;
-
-            mek.message =
-                getContentType(mek.message) === "ephemeralMessage"
-                    ? mek.message.ephemeralMessage.message
-                    : mek.message;
-
-            if (mek.key?.remoteJid !== "status@broadcast") return;
-
-            const s = await getAllSettings();
-
-            // Sender of a status is on mek.participant (top-level), NOT inside mek.key
-            const rawParticipant = mek.participant || mek.key.participantPn || mek.key.participant;
-            const participantJid = await resolveRealJid(Gifted, rawParticipant);
-
-            // AUTO VIEW STATUS — works on its own; auto-like and auto-reply require this to be ON
-            const shouldView = s.AUTO_READ_STATUS === "true";
-
-            const readKey = (participantJid && participantJid !== mek.key.participant)
-                ? { ...mek.key, participant: participantJid }
-                : mek.key;
-
-            if (shouldView) {
-                await Gifted.readMessages([readKey]);
-            }
-
-            // AUTO LIKE STATUS — only fires when auto-view is ON (status must be viewed first)
-            if (shouldView && s.AUTO_LIKE_STATUS === "true" && participantJid) {
-                const emojis = (s.STATUS_LIKE_EMOJIS || "💛,❤️,💜,🤍,💙").split(",").map(e => e.trim()).filter(Boolean);
-                const randomEmoji = emojis[Math.floor(Math.random() * emojis.length)];
-                const reactKey = { ...mek.key, participant: participantJid };
-                await Gifted.sendMessage(
-                    "status@broadcast",
-                    { react: { text: randomEmoji, key: reactKey } },
-                    { statusJidList: [participantJid] }
-                );
-            }
-
-            // AUTO REPLY STATUS — only fires when auto-view is ON
-            if (shouldView && s.AUTO_REPLY_STATUS === "true" && !mek.key.fromMe && participantJid) {
-                await Gifted.sendMessage(
-                    participantJid,
-                    { text: s.STATUS_REPLY_TEXT || DEFAULT_SETTINGS.STATUS_REPLY_TEXT },
-                    { quoted: mek }
-                );
-            }
-        } catch (error) {
-            const code = error?.output?.statusCode || error?.code || "";
-            const msg  = error?.message || "";
-            const transient =
-                code === 428 ||
-                msg === "Connection Closed" ||
-                msg.includes("ECONNRESET") ||
-                msg.includes("ETIMEDOUT") ||
-                msg.includes("ECONNREFUSED") ||
-                msg.includes("EPIPE") ||
-                msg.includes("Connection Terminated") ||
-                msg.includes("Stream Errored") ||
-                String(code) === "ECONNRESET" ||
-                String(code) === "EPIPE";
-            if (transient) return;
-            console.error("Error Processing Status Actions:", error);
         }
     });
 }
@@ -734,23 +613,6 @@ function setupCommandHandler(Gifted) {
                 );
                 return;
             }
-        }
-
-        const autoReadMode = settings.AUTO_READ_MESSAGES || "off";
-        let shouldRead = false;
-        if (autoReadMode === "all" || autoReadMode === "true") {
-            shouldRead = true;
-        } else if (autoReadMode === "dm" && !isGroup) {
-            shouldRead = true;
-        } else if (autoReadMode === "groups" && isGroup) {
-            shouldRead = true;
-        } else if (autoReadMode === "commands" && isCommand) {
-            shouldRead = true;
-        }
-        if (shouldRead) {
-            void Gifted.readMessages([ms.key]).catch((readErr) =>
-                console.error("Read receipt error:", readErr),
-            );
         }
 
         if (bodyCmd && bodyCmd.function && !isMaintenanceCommand) {

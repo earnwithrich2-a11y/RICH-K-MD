@@ -150,8 +150,9 @@ test("auto-block and read receipts do not delay command handlers", () => {
 
     assert.match(handler, /void\s+Gifted\.updateBlockStatus\s*\(/);
     assert.doesNotMatch(handler, /await\s+Gifted\.updateBlockStatus\s*\(/);
-    assert.match(handler, /void\s+Gifted\.readMessages\s*\(/);
-    assert.doesNotMatch(handler, /await\s+Gifted\.readMessages\s*\(/);
+    // Optional auto-read now has its own listener, including ordinary messages.
+    assert.doesNotMatch(handler, /Gifted\.readMessages\s*\(/);
+    assert.match(dispatcherSource, /installOptionalAutomation\(Gifted/);
     assert.match(handler, /void\s+Gifted\.updateBlockStatus[\s\S]*?return;/);
 });
 

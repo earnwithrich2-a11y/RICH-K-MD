@@ -43,8 +43,9 @@ const DEFAULT_SETTINGS = {
     BOT_PAUSED: "false",
     WARN_COUNT: "3",
     TIME_ZONE: config.TIME_ZONE || "Africa/Accra",
-    DM_PRESENCE: "online",
-    GC_PRESENCE: "online",
+    DM_PRESENCE: "offline",
+    GC_PRESENCE: "offline",
+    ALWAYS_ONLINE: "false",
     CHATBOT: "false",
     CHATBOT_MODE: "inbox",
     STARTING_MESSAGE: "true",
@@ -52,8 +53,8 @@ const DEFAULT_SETTINGS = {
     ANTI_EDIT: "indm",
     ANTICALL: "false",
     ANTICALL_MSG: "*_📞 Auto Call Reject Mode Active. 📵 No Calls Allowed!_*",
-    AUTO_LIKE_STATUS: config.AUTO_LIKE_STATUS || "true",
-    AUTO_READ_STATUS: config.AUTO_READ_STATUS || "true",
+    AUTO_LIKE_STATUS: config.AUTO_LIKE_STATUS || "false",
+    AUTO_READ_STATUS: config.AUTO_READ_STATUS || "false",
     STATUS_LIKE_EMOJIS: "💛,❤️,💜,🤍,💙",
     AUTO_REPLY_STATUS: "false",
     STATUS_REPLY_TEXT: "*ʏᴏᴜʀ sᴛᴀᴛᴜs ᴠɪᴇᴡᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ ✅*",
@@ -71,7 +72,7 @@ const DEFAULT_SETTINGS = {
     PACK_AUTHOR: "RICHK-MD",
     SUDO_NUMBERS: "",
     PM_PERMIT: "false",
-    ANTIVIEWONCE: "indm",
+    ANTIVIEWONCE: "off",
 };
 
 let initialized = false;
@@ -139,6 +140,23 @@ async function initializeSettings() {
         });
     }
 
+    // Start the audited optional automation OFF once, including legacy ON defaults.
+    // Subsequent explicit choices persist. Recovery and group protections are untouched.
+    const automationRollout = await SettingsDB.findOne({ where: { key: "OPTIONAL_AUTOMATION_SAFE_DEFAULTS" } });
+    if (!automationRollout) {
+        for (const [key, value] of Object.entries({
+            AUTO_READ_STATUS: "false", AUTO_LIKE_STATUS: "false", AUTO_REACT: "off",
+            AUTO_READ_MESSAGES: "off", ANTIVIEWONCE: "off", ALWAYS_ONLINE: "false",
+            DM_PRESENCE: "offline", GC_PRESENCE: "offline",
+        })) {
+            const record = await SettingsDB.findOne({ where: { key } });
+            if (record) { record.value = value; await record.save(); }
+        }
+        await SettingsDB.findOrCreate({
+            where: { key: "OPTIONAL_AUTOMATION_SAFE_DEFAULTS" },
+            defaults: { key: "OPTIONAL_AUTOMATION_SAFE_DEFAULTS", value: "done" },
+        });
+    }
     initialized = true;
     console.log("✅ Bot Settings Initialized");
 }
