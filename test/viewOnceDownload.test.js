@@ -133,7 +133,8 @@ test("real read-only archive adapter returns full originals and enforces private
         store: { loadMessage: () => null },
         archive: { dir, find: (chat, id) => chat === "chat@g.us" && id === "original" ? row : null },
     });
-    assert.ok(socket.viewOnceStore.getMessage("chat@g.us", "original"));
+    t.after(socket.viewOnceStore.dispose);
+    assert.ok(await socket.viewOnceStore.getMessage("chat@g.us", "original"));
     assert.deepEqual(await socket.viewOnceStore.getMedia("chat@g.us", "original"), Buffer.from("cached media"));
     assert.equal(await socket.viewOnceStore.getMedia("unrelated@g.us", "original"), null);
     row = { ...row, media: "../secret" };
@@ -151,6 +152,7 @@ test("an opened empty quote recovers the complete original from the real pre-exi
         Readable.from([Buffer.from("complete "), Buffer.from("voice note")]));
     const socket = {};
     attachViewOnceStore(socket, { store: { loadMessage: () => null }, archive });
+    t.after(socket.viewOnceStore.dispose);
     const result = await recoverViewOnce(socket, context({ viewOnceMessageV2Extension: { message: {} } }), {
         save: async () => { throw new Error("Must not require network after opening"); },
     });
