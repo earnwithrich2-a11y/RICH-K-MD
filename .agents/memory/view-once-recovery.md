@@ -33,3 +33,14 @@ helper for the other can reintroduce failures for otherwise downloadable media.
 
 **How to apply:** Verify the installed helper's accepted inputs before changing
 download APIs; preserve full-buffer and directPath-only regression tests.
+
+Do not treat the generic store's latest record or a stripped quote as the only
+source of View-Once decryption metadata.
+
+**Why:** The user specifically identified quote stripping of mediaKey/directPath
+and requested a separate incoming-message metadata cache lasting at least 15 minutes.
+
+**How to apply:** Capture full envelopes synchronously before other listeners can
+normalize them; preserve good keys against stripped retransmissions. Look up the
+normal chat-scoped store first, then the independent snapshot. Socket reconnection
+must not shorten the process-wide retention window or change private delivery.

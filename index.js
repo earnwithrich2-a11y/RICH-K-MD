@@ -9,6 +9,7 @@ const { extractMessageText } = require("./RICHK-MD-core/connection/serializer");
 const { installOptionalAutomation } = require("./RICHK-MD-core/connection/optionalAutomation");
 const { installAntiKick } = require("./RICHK-MD-core/connection/antiKick");
 const { attachViewOnceStore } = require("./RICHK-MD-core/connection/viewOnceDownload");
+const { ViewOnceCache } = require("./RICHK-MD-core/connection/viewOnceCache");
 const { getGroupSetting } = require("./RICHK-MD-core/database/groupSettings");
 const { getCommandSettings } = require("./RICHK-MD-core/database/settings");
 const { getCachedSudoNumbers } = require("./RICHK-MD-core/database/sudo");
@@ -188,6 +189,7 @@ setInterval(async () => {
 
 const sessionDir = path.join(__dirname, "RICHK-MD-core", "session");
 let recoveryArchive;
+const viewOnceCache = new ViewOnceCache();
 let menuPromo;
 const pluginsPath = path.join(__dirname, "RICHK-MD-commands");
 if (smokeTestMode) {
@@ -296,7 +298,7 @@ async function startGifted() {
         // Recovery captures the entire batch in RAM before the general
         // SQLite store or any command/automation listener touches it.
         recoveryArchive ||= new RecoveryArchive(path.join(sessionDir, "recovery"));
-        attachViewOnceStore(Gifted, { store, archive: recoveryArchive });
+        attachViewOnceStore(Gifted, { store, archive: recoveryArchive, cache: viewOnceCache });
         installMessageRecovery(Gifted, {
             archive: recoveryArchive,
             getSettings: getAllSettings,

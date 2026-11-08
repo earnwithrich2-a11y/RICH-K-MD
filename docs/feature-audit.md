@@ -43,6 +43,12 @@ loaded by the application and were left alone.
   Opened media is recoverable only if a saved copy or downloadable original still
   exists; no command can recreate content the bot never received and WhatsApp no
   longer supplies.
+  Original lookup checks `store.loadMessage(chat, quotedId)` first. A separate
+  metadata-only memory Map captures incoming view-once envelopes synchronously,
+  before normalization, retaining full keys for 15 minutes. It is indexed by
+  message ID with per-chat isolation, survives socket reconnects within the same
+  process, and expires automatically. Process restarts still rely on the durable
+  message/recovery stores.
 - Automatic media downloads are memory-only, limited to 32 MB each, with
   20-second network/stream timeouts, three concurrent downloads and a queue of 32.
   Failures/overflow are logged; no promise of unlimited archival is made.

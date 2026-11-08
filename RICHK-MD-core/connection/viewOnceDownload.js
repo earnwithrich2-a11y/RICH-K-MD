@@ -4,17 +4,40 @@ const { unwrap } = require("./recoveryArchive");
 const { safeParse, safeStringify } = require("../database/messageStore");
 const { extractViewOnceMedia, hasViewOnceMarker } = require("./viewOnceMedia");
 const { mediaContent, bufferContent } = require("./automationMedia");
+const { ViewOnceCache, completeMedia } = require("./viewOnceCache");
 
 const UNAVAILABLE = "This view-once media is no longer available. It may have been opened or expired, and the bot has no downloadable original or saved copy.";
 
 // Read-only access to existing, chat-scoped stores. Never search by ID alone.
-function attachViewOnceStore(socket, { store, archive }) {
+function attachViewOnceStore(socket, { store, archive, cache }) {
+    const recent = cache || new ViewOnceCache();
+    const capture = ({ messages = [] }) => {
+        for (const message of messages) {
+            try { recent.capture(message); }
+            catch { console.warn("[ViewOnce] Could not cache incoming media metadata."); }
+        }
+    };
+    const connection = ({ connection }) => {
+        if (connection === "close") dispose();
+    };
+    function dispose() {
+        socket.ev?.off("messages.upsert", capture);
+        socket.ev?.off("connection.update", connection);
+        // The process-wide cache must survive socket reconnects for its full TTL.
+        if (!cache) recent.destroy();
+    }
+    // Install before store.bind and all message normalization/command listeners.
+    socket.ev?.on("messages.upsert", capture);
+    socket.ev?.on("connection.update", connection);
     socket.viewOnceStore = {
-        getMessage(chat, id) {
+        async getMessage(chat, id) {
             let saved;
-            try { saved = store.loadMessage(chat, id); } catch { /* Try the independent recovery archive. */ }
-            const full = extractViewOnceMedia(saved?.message);
-            if (full?.media.url || full?.media.directPath) return saved;
+            try { saved = await store.loadMessage(chat, id); } catch { /* Try the independent caches. */ }
+            if (completeMedia(saved)) return saved;
+            const captured = recent.get(chat, id);
+            if (completeMedia(captured)) return captured;
+            // Preserve the prior durable fallback for older messages.
+            if (captured) return archive.find(chat, id)?.original || captured;
             return archive.find(chat, id)?.original || saved || null;
         },
         async getMedia(chat, id) {
@@ -25,16 +48,18 @@ function attachViewOnceStore(socket, { store, archive }) {
             if (!stat.size || stat.size > 32 * 1024 * 1024) return null;
             return fs.readFile(file);
         },
+        dispose,
     };
 }
 
 async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
-    const message = context.mek || context.m;
+    const message = context.mek || context.m || context;
     const info = message?.message?.extendedTextMessage?.contextInfo || {};
-    const quoted = context.quotedMsg || context.quoted || info.quotedMessage;
-    const id = info.stanzaId || context.quotedKey?.id;
+    const quoted = context.quotedMsg || context.quoted?.message || context.quoted ||
+        message?.quoted?.message || info.quotedMessage;
+    const id = info.stanzaId || context.quotedKey?.id || context.quoted?.id || message?.quoted?.id;
     // Only authenticated envelope addresses may select a store's conversation.
-    const chats = [...new Set([message?.key?.remoteJid, message?.key?.remoteJidAlt].filter(Boolean))];
+    const chats = [...new Set([message?.key?.remoteJid || message?.chat, message?.key?.remoteJidAlt].filter(Boolean))];
     let original, originalChat;
     if (id) for (const chat of chats) {
         try {
