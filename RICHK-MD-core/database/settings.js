@@ -73,7 +73,7 @@ const DEFAULT_SETTINGS = {
     SUDO_NUMBERS: "",
     PM_PERMIT: "false",
     ANTIVIEWONCE: "off",
-    VIEW_ONCE_CACHE: "false",
+    VIEW_ONCE_CACHE: "true",
 };
 
 let initialized = false;
@@ -156,6 +156,17 @@ async function initializeSettings() {
         await SettingsDB.findOrCreate({
             where: { key: "OPTIONAL_AUTOMATION_SAFE_DEFAULTS" },
             defaults: { key: "OPTIONAL_AUTOMATION_SAFE_DEFAULTS", value: "done" },
+        });
+    }
+    // Enable background View-Once caching on existing installations once.
+    // Later explicit OFF choices must survive subsequent restarts.
+    const viewOnceCacheRollout = await SettingsDB.findOne({ where: { key: "VIEW_ONCE_CACHE_DEFAULT_ON_SETUP" } });
+    if (!viewOnceCacheRollout) {
+        const record = await SettingsDB.findOne({ where: { key: "VIEW_ONCE_CACHE" } });
+        if (record) { record.value = "true"; await record.save(); }
+        await SettingsDB.findOrCreate({
+            where: { key: "VIEW_ONCE_CACHE_DEFAULT_ON_SETUP" },
+            defaults: { key: "VIEW_ONCE_CACHE_DEFAULT_ON_SETUP", value: "done" },
         });
     }
     initialized = true;

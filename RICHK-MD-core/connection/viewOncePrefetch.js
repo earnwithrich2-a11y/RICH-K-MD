@@ -5,7 +5,7 @@ const { MIN_RETENTION_MS } = require("./viewOnceCache");
 
 const keyOf = message => `${message.key.remoteJid}\0${message.key.id}`;
 
-// Opt-in media bytes, separate from the always-on metadata cache and recovery.
+// Background media bytes, separate from the always-on metadata cache and recovery.
 class ViewOnceBuffers {
     constructor({ now = Date.now, maxBytes = 64 * 1024 * 1024, maxEntries = 128 } = {}) {
         this.now = now;

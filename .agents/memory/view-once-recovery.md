@@ -52,9 +52,20 @@ caching was added. Server access can disappear after opening; outgoing mirrors
 also use device-sent wrappers and do not enter the incoming-only recovery archive.
 
 **How to apply:** Test with server downloads unavailable after the original was
-received. Byte prefetch must be explicit opt-in, bounded, short-lived and private,
+received. Byte prefetch must be bounded, short-lived and private,
 with no automatic forwarding. Preserve Anti-Delete's own-message exclusions;
 support linked-device envelopes in the separate manual View-Once path instead.
+
+Private background View-Once caching defaults ON for all chats, with no manual
+enable command required. Keep an explicit OFF choice available and persistent.
+
+**Why:** The user explicitly requested default-true caching so users never have
+to run `.vvcache on` manually. This supersedes the previous opt-in caching rule,
+not the OFF defaults for unrelated automation or automatic media forwarding.
+
+**How to apply:** Apply the default to both fresh and existing installations
+once, then respect later owner OFF choices across restarts. Cache keys and bytes
+in the background without adding automatic sends or changing `.vv` privacy.
 
 The user confirmed their active bot runs on another host, not this workspace.
 

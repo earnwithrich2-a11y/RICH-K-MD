@@ -50,9 +50,11 @@ loaded by the application and were left alone.
   process, and expires automatically. Process restarts still rely on the durable
   message/recovery stores.
 - `.vvcache on/off` separately controls private byte prefetch for future View-Once
-  messages, including linked-device outgoing copies. It defaults OFF and never
-  forwards anything automatically. Enable it before a new message arrives or is
-  opened. Bytes are held only in process memory for 15 minutes, with a 64 MB total
+  messages, including linked-device outgoing copies. It defaults ON for all chats
+  and never forwards anything automatically. A one-time rollout enables it on
+  existing installations too; later `.vvcache off` choices survive restarts.
+  Background caching must finish before opening removes server access. Bytes are
+  held only in process memory for 15 minutes, with a 64 MB total
   budget, 128-entry cap, 32 MB per-file limit, two concurrent downloads and a
   32-item waiting queue. Capacity pressure may evict older copies. OFF clears
   these temporary copies and prevents in-flight downloads from repopulating them.

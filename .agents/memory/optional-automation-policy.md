@@ -7,6 +7,9 @@ Optional status viewing/liking, message reactions/reads, fake presence, always-o
 and automatic view-once saving should default OFF and require explicit opt-in.
 After the safety rollout, preserve the owner's saved toggle choices across restarts.
 
+Private background View-Once caching is the user-requested default-ON exception;
+see [View-once recovery](view-once-recovery.md). It does not automatically send media.
+
 **Why:** The user specifically requested OFF defaults to reduce rate-limit risk,
 and asked that audits preserve existing working commands, Anti-Delete, Anti-Edit
 and group protection behavior rather than duplicating or overwriting them.

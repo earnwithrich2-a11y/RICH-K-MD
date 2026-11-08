@@ -24,12 +24,31 @@ function fixture(t, { settings = {}, save, ...options } = {}) {
     return { buffers, controller, socket, errors, settings };
 }
 
-test("prefetch is OFF without explicit opt-in and never downloads or forwards anything", async t => {
+for (const settings of [{}, { VIEW_ONCE_CACHE: "false" }]) {
+    test(`uninitialized or explicitly OFF settings never download or forward (${JSON.stringify(settings)})`, async t => {
+        let downloads = 0;
+        const f = fixture(t, { settings, save: async () => { downloads++; return { image: Buffer.from("bytes") }; } });
+        await f.controller.offer(original());
+        assert.equal(downloads, 0);
+        assert.equal(f.buffers.entries.size, 0);
+    });
+}
+
+test("enabled background caching covers incoming DMs, groups and outgoing self-chat without commands or sends", async t => {
     let downloads = 0;
-    const f = fixture(t, { save: async () => { downloads++; return { image: Buffer.from("bytes") }; } });
-    await f.controller.offer(original());
-    assert.equal(downloads, 0);
-    assert.equal(f.buffers.entries.size, 0);
+    const f = fixture(t, { settings: { VIEW_ONCE_CACHE: "true" },
+        save: async () => { downloads++; return { image: Buffer.from("copy") }; } });
+    for (const message of [
+        original("dm", "100@s.whatsapp.net"),
+        original("group", "200@g.us"),
+        original("self", "300@s.whatsapp.net", "image", true),
+    ]) {
+        await f.controller.offer(message);
+        assert.deepEqual(await f.controller.wait(message.key.remoteJid, message.key.id), Buffer.from("copy"));
+        assert.ok(f.buffers.getMessage(message.key.remoteJid, message.key.id));
+    }
+    assert.equal(downloads, 3);
+    assert.equal(f.errors.length, 0);
 });
 
 for (const type of ["image", "video", "audio"]) {
