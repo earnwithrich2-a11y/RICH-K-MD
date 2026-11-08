@@ -49,6 +49,16 @@ loaded by the application and were left alone.
   message ID with per-chat isolation, survives socket reconnects within the same
   process, and expires automatically. Process restarts still rely on the durable
   message/recovery stores.
+- `.vvcache on/off` separately controls private byte prefetch for future View-Once
+  messages, including linked-device outgoing copies. It defaults OFF and never
+  forwards anything automatically. Enable it before a new message arrives or is
+  opened. Bytes are held only in process memory for 15 minutes, with a 64 MB total
+  budget, 128-entry cap, 32 MB per-file limit, two concurrent downloads and a
+  32-item waiting queue. Capacity pressure may evict older copies. OFF clears
+  these temporary copies and prevents in-flight downloads from repopulating them.
+  A process restart loses these copies; metadata and existing recovery stores
+  remain separate. Already-lost media still needs to be resent. Old append
+  history is not automatically downloaded.
 - Automatic media downloads are memory-only, limited to 32 MB each, with
   20-second network/stream timeouts, three concurrent downloads and a queue of 32.
   Failures/overflow are logged; no promise of unlimited archival is made.

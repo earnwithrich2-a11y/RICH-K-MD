@@ -44,3 +44,23 @@ and requested a separate incoming-message metadata cache lasting at least 15 min
 normalize them; preserve good keys against stripped retransmissions. Look up the
 normal chat-scoped store first, then the independent snapshot. Socket reconnection
 must not shorten the process-wide retention window or change private delivery.
+
+Keeping full keys is not equivalent to keeping recoverable media bytes.
+
+**Why:** The user still received an unavailable-media result after metadata
+caching was added. Server access can disappear after opening; outgoing mirrors
+also use device-sent wrappers and do not enter the incoming-only recovery archive.
+
+**How to apply:** Test with server downloads unavailable after the original was
+received. Byte prefetch must be explicit opt-in, bounded, short-lived and private,
+with no automatic forwarding. Preserve Anti-Delete's own-message exclusions;
+support linked-device envelopes in the separate manual View-Once path instead.
+
+The user confirmed their active bot runs on another host, not this workspace.
+
+**Why:** They identified the source of the unavailable-media screenshot when
+asked where that bot was running.
+
+**How to apply:** Verify the currently running host/version before attributing
+its behavior to workspace login state. A GitHub push does not itself load code on
+that other host; distinguish local tests from live-host delivery verification.

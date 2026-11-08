@@ -99,6 +99,7 @@ gmd(
 *👁️ VIEW ONCE*
 ▸ *${p}vv* / *${p}👍* — Reply to a view-once image, video or audio to save it privately
 ▸ *${p}antiviewonce on/off* — ${formatSettingsStatus(settings.ANTIVIEWONCE)} · Save incoming view-once media to your DM
+▸ *${p}vvcache on/off* — ${formatSettingsStatus(settings.VIEW_ONCE_CACHE)} · Temporarily keep future view-once media without forwarding
 
 *📱 STATUS*
 ▸ *${p}savestatus* — Reply to a status to save it to your DM

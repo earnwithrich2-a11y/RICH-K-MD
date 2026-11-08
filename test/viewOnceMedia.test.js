@@ -34,3 +34,14 @@ test("rejects ordinary media and empty wrappers", () => {
     assert.equal(extractViewOnceMedia({ imageMessage: { mimetype: "image/jpeg" } }), null);
     assert.equal(extractViewOnceMedia({ viewOnceMessageV2: {} }), null);
 });
+
+test("linked-device outgoing view-once images, video and audio are found inside deviceSentMessage wrappers", () => {
+    for (const type of ["image", "video", "audio"]) {
+        const media = { mediaKey: Buffer.from("key"), directPath: "/media" };
+        const content = { deviceSentMessage: { destinationJid: "100@s.whatsapp.net",
+            message: { ephemeralMessage: { message: { viewOnceMessageV2Extension: { message: {
+                [`${type}Message`]: media,
+            } } } } } } };
+        assert.deepEqual(extractViewOnceMedia(content), { mediaType: `${type}Message`, media });
+    }
+});

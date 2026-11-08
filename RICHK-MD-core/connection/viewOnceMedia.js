@@ -13,6 +13,8 @@ function extractViewOnceMedia(quoted) {
 
         if (content.ephemeralMessage?.message) {
             content = content.ephemeralMessage.message;
+        } else if (content.deviceSentMessage?.message) {
+            content = content.deviceSentMessage.message;
         } else {
             const wrapper =
                 content.viewOnceMessage ||

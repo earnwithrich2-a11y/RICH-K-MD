@@ -73,6 +73,7 @@ const DEFAULT_SETTINGS = {
     SUDO_NUMBERS: "",
     PM_PERMIT: "false",
     ANTIVIEWONCE: "off",
+    VIEW_ONCE_CACHE: "false",
 };
 
 let initialized = false;

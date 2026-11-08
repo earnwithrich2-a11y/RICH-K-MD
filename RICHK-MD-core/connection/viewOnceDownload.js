@@ -5,15 +5,26 @@ const { safeParse, safeStringify } = require("../database/messageStore");
 const { extractViewOnceMedia, hasViewOnceMarker } = require("./viewOnceMedia");
 const { mediaContent, bufferContent } = require("./automationMedia");
 const { ViewOnceCache, completeMedia } = require("./viewOnceCache");
+const { createViewOncePrefetch } = require("./viewOncePrefetch");
 
 const UNAVAILABLE = "This view-once media is no longer available. It may have been opened or expired, and the bot has no downloadable original or saved copy.";
 
 // Read-only access to existing, chat-scoped stores. Never search by ID alone.
-function attachViewOnceStore(socket, { store, archive, cache }) {
+function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettings, prefetchOptions = {} }) {
     const recent = cache || new ViewOnceCache();
-    const capture = ({ messages = [] }) => {
+    const prefetch = buffers && getSettings ?
+        createViewOncePrefetch(socket, { buffers, getSettings, ...prefetchOptions }) : null;
+    const capture = ({ messages = [], type }) => {
         for (const message of messages) {
-            try { recent.capture(message); }
+            try {
+                recent.capture(message);
+                const original = recent.get(message.key?.remoteJid, message.key?.id);
+                const raw = message.messageTimestamp;
+                const seconds = typeof raw?.toNumber === "function" ? raw.toNumber() : Number(raw?.low ?? raw);
+                const freshAppend = type === "append" && seconds * 1000 >= Date.now() - 60000 &&
+                    seconds * 1000 <= Date.now() + 30000;
+                if (original && (type === "notify" || freshAppend)) void prefetch?.offer(original);
+            }
             catch { console.warn("[ViewOnce] Could not cache incoming media metadata."); }
         }
     };
@@ -23,6 +34,7 @@ function attachViewOnceStore(socket, { store, archive, cache }) {
     function dispose() {
         socket.ev?.off("messages.upsert", capture);
         socket.ev?.off("connection.update", connection);
+        prefetch?.close();
         // The process-wide cache must survive socket reconnects for its full TTL.
         if (!cache) recent.destroy();
     }
@@ -36,11 +48,17 @@ function attachViewOnceStore(socket, { store, archive, cache }) {
             if (completeMedia(saved)) return saved;
             const captured = recent.get(chat, id);
             if (completeMedia(captured)) return captured;
+            const prefetched = buffers?.getMessage(chat, id);
+            if (prefetched) return prefetched;
             // Preserve the prior durable fallback for older messages.
             if (captured) return archive.find(chat, id)?.original || captured;
             return archive.find(chat, id)?.original || saved || null;
         },
         async getMedia(chat, id) {
+            let privateCopy;
+            try { privateCopy = await prefetch?.wait(chat, id); }
+            catch { /* Optional prefetch must not disable existing archived copies. */ }
+            if (privateCopy) return privateCopy;
             const row = archive.find(chat, id);
             if (!/^[a-f0-9]{64}$/.test(row?.media || "")) return null;
             const file = path.join(archive.dir, row.media);
@@ -48,6 +66,7 @@ function attachViewOnceStore(socket, { store, archive, cache }) {
             if (!stat.size || stat.size > 32 * 1024 * 1024) return null;
             return fs.readFile(file);
         },
+        clearMediaCache: () => buffers?.clear(),
         dispose,
     };
 }
