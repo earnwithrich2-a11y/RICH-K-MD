@@ -13,3 +13,4 @@
 - [Maintenance safety](maintenance-safety.md) — strict owner/connected/sudo access, no logout or credential replacement, and safe fast-forward-only updates.
 - [Clean command responses](command-output-style.md) — no automatic header/footer frames; update notices use the user's plain, nontechnical wording.
 - [Optional automation safety](optional-automation-policy.md) — OFF defaults and explicit opt-in; preserve working commands and existing recovery/group protections.
+- [View-once recovery](view-once-recovery.md) — opened quotes can lose metadata; use chat-scoped saved originals and keep recovered media in the requester’s inbox.

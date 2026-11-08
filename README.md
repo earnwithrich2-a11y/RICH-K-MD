@@ -6,6 +6,12 @@ The source is organized into `RICHK-MD-core` (runtime, settings and local data) 
 `RICHK-MD-commands` (WhatsApp commands). Runtime session and database files stay in
 `RICHK-MD-core` and are not committed to Git.
 
+<details>
+<summary>GET YOUR SESSION_ID</summary>
+<a href="https://rich-k.onrender.com/"><img src="https://img.shields.io/badge/CLICK%20HERE-green" alt="Pairing Code" width="150"></a>
+
+</details>
+
 (A) HEROKU DEPLOYMENT
 
 <details>
