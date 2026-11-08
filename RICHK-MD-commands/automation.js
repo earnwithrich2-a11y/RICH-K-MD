@@ -7,7 +7,7 @@ const { isMaintenanceOwner, DENIED } = require("../RICHK-MD-core/connection/main
 const { connectedUserJid } = require("../RICHK-MD-core/connection/messageRecovery");
 const { mediaContent } = require("../RICHK-MD-core/connection/automationMedia");
 
-for (const pattern of ["faketyping", "fakerecording", "alwaysonline", "antiviewonce"]) {
+for (const pattern of ["faketyping", "fakerecording", "alwaysonline", "antiviewonce", "vvcache"]) {
     gmd({ pattern, ...(pattern === "antiviewonce" ? { aliases: ["antivv"] } : {}),
         category: "owner", description: `${pattern} on/off (owner only).`, filename: __filename },
     async (from, socket, context) => {
@@ -24,6 +24,12 @@ for (const pattern of ["faketyping", "fakerecording", "alwaysonline", "antiviewo
             if (!enabled && /@(g\.us|s\.whatsapp\.net|lid)$/.test(from)) {
                 await socket.sendPresenceUpdate("paused", from).catch(() => {});
             }
+        } else if (pattern === "vvcache") {
+            await setSetting("VIEW_ONCE_CACHE", String(enabled));
+            if (!enabled) socket.viewOnceStore?.clearMediaCache();
+            return context.reply(enabled ?
+                "Private View-Once caching is ON for future messages. Short-lived copies stay local; use .vv or .👍 to receive one privately. This does not restore already-lost media." :
+                "Private View-Once caching is OFF. Its temporary media copies have been cleared.");
         } else {
             await setSetting(pattern === "alwaysonline" ? "ALWAYS_ONLINE" : "ANTIVIEWONCE",
                 pattern === "antiviewonce" ? (enabled ? "indm" : "off") : String(enabled));

@@ -5,7 +5,7 @@ const { isMaintenanceOwner, DENIED } = require("../RICHK-MD-core/connection/main
 const plugin = require.resolve("../RICHK-MD-commands/automation");
 const registered = [];
 const values = {}, writes = [], sent = [], presence = [];
-let metadata = { participants: [] }, downloadError = false;
+let metadata = { participants: [] }, downloadError = false, cleared = 0;
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
     if (parent?.filename === plugin) {
@@ -34,6 +34,7 @@ async function run(pattern, q, overrides = {}) {
         user: { id: "300:4@s.whatsapp.net" },
         sendMessage: async (...args) => sent.push(args),
         sendPresenceUpdate: async (...args) => presence.push(args),
+        viewOnceStore: { clearMediaCache: () => { cleared++; } },
     };
     await registered.find(cmd => cmd.pattern === pattern).handler("123@g.us", socket, {
         q, sender: "300@s.whatsapp.net", mek: { key: { fromMe: true } },
@@ -44,16 +45,16 @@ async function run(pattern, q, overrides = {}) {
 
 test.beforeEach(() => {
     for (const key of Object.keys(values)) delete values[key];
-    writes.length = 0; sent.length = 0; presence.length = 0; downloadError = false;
+    writes.length = 0; sent.length = 0; presence.length = 0; downloadError = false; cleared = 0;
 });
 
 test("new commands register once without duplicating existing download, AI or status controls", () => {
     assert.deepEqual(registered.map(cmd => cmd.pattern),
-        ["faketyping", "fakerecording", "alwaysonline", "antiviewonce", "antikick", "savestatus"]);
+        ["faketyping", "fakerecording", "alwaysonline", "antiviewonce", "vvcache", "antikick", "savestatus"]);
     assert.ok(registered.find(cmd => cmd.pattern === "savestatus").aliases.includes("statusdl"));
 });
 
-for (const pattern of ["faketyping", "fakerecording", "alwaysonline", "antiviewonce", "savestatus"]) {
+for (const pattern of ["faketyping", "fakerecording", "alwaysonline", "antiviewonce", "vvcache", "savestatus"]) {
     test(`${pattern} rejects non-owners even when a broad superuser flag is supplied`, async () => {
         const replies = await run(pattern, "on", {
             sender: "999@s.whatsapp.net", ownerNumber: "400", isSuperUser: true, mek: { key: { fromMe: false } },
@@ -87,6 +88,18 @@ test("always-online and automatic view-once have strict on/off settings and reta
     assert.match((await run("alwaysonline", "invalid"))[0], /Usage/);
     assert.equal(writes.length, before);
     assert.ok(writes.every(([key]) => !["ANTIDELETE", "ANTI_EDIT", "LOCKURL", "ANTILINK"].includes(key)));
+});
+
+test("private byte prefetch requires opt-in, persists its switch, and clears only its own copies when disabled", async () => {
+    assert.match((await run("vvcache", "on"))[0], /future messages/);
+    assert.equal(values.VIEW_ONCE_CACHE, "true");
+    assert.equal(values.ANTIVIEWONCE, undefined);
+    assert.equal(cleared, 0);
+    assert.match((await run("vvcache", "off"))[0], /OFF/);
+    assert.equal(values.VIEW_ONCE_CACHE, "false");
+    assert.equal(cleared, 1);
+    assert.equal(sent.length, 0);
+    assert.ok(writes.every(([key]) => key === "VIEW_ONCE_CACHE"));
 });
 
 test("anti-kick toggles are group-admin only, persist per group, and require bot admin rights", async () => {

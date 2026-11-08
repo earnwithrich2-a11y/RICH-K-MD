@@ -679,8 +679,16 @@ gmd(
       await react("✅");
     } catch (e) {
       console.warn("[ViewOnce] Private media recovery or delivery failed.");
-      await reply(e.message?.startsWith("Please reply") || e.message?.startsWith("This view-once")
-        ? e.message : "Could not deliver the recovered media privately. Please try again.");
+      let notice = e.message?.startsWith("Please reply") || e.message?.startsWith("This view-once")
+        ? e.message : "Could not deliver the recovered media privately. Please try again.";
+      if (e.message?.startsWith("This view-once")) {
+        try {
+          notice += await getSetting("VIEW_ONCE_CACHE") === "true" ?
+            "\nAsk the sender to resend a fresh copy; the bot must finish caching it before it is opened." :
+            "\nFor future messages, enable .vvcache on before they are sent or opened. Ask the sender to resend this one.";
+        } catch { notice += "\nAsk the sender to resend a fresh copy while the bot is connected."; }
+      }
+      await reply(notice);
     }
   },
 );
