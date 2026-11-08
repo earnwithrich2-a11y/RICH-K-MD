@@ -37,6 +37,12 @@ loaded by the application and were left alone.
   and audio are supported. Saved copies go only to the connected account's DM.
 - Automatic view-once saving also sends only to the connected account's DM.
   It cannot recover media WhatsApp no longer supplies.
+- Manual `.vv` and `.👍` support view-once photos, videos and audio and send full
+  buffers to the requester's private inbox. They first consult chat-scoped
+  original/media caches, then attempt download and one native media refresh.
+  Opened media is recoverable only if a saved copy or downloadable original still
+  exists; no command can recreate content the bot never received and WhatsApp no
+  longer supplies.
 - Automatic media downloads are memory-only, limited to 32 MB each, with
   20-second network/stream timeouts, three concurrent downloads and a queue of 32.
   Failures/overflow are logged; no promise of unlimited archival is made.

@@ -97,7 +97,7 @@ gmd(
 ╰━━━━━━━━━━━━━━╯
 
 *👁️ VIEW ONCE*
-▸ *${p}vv* — Reply to a view-once message to save it
+▸ *${p}vv* / *${p}👍* — Reply to a view-once image, video or audio to save it privately
 ▸ *${p}antiviewonce on/off* — ${formatSettingsStatus(settings.ANTIVIEWONCE)} · Save incoming view-once media to your DM
 
 *📱 STATUS*

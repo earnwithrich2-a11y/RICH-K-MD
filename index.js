@@ -8,6 +8,7 @@ const { installAutomatedMessageGuard } = require("./RICHK-MD-core/connection/aut
 const { extractMessageText } = require("./RICHK-MD-core/connection/serializer");
 const { installOptionalAutomation } = require("./RICHK-MD-core/connection/optionalAutomation");
 const { installAntiKick } = require("./RICHK-MD-core/connection/antiKick");
+const { attachViewOnceStore } = require("./RICHK-MD-core/connection/viewOnceDownload");
 const { getGroupSetting } = require("./RICHK-MD-core/database/groupSettings");
 const { getCommandSettings } = require("./RICHK-MD-core/database/settings");
 const { getCachedSudoNumbers } = require("./RICHK-MD-core/database/sudo");
@@ -295,6 +296,7 @@ async function startGifted() {
         // Recovery captures the entire batch in RAM before the general
         // SQLite store or any command/automation listener touches it.
         recoveryArchive ||= new RecoveryArchive(path.join(sessionDir, "recovery"));
+        attachViewOnceStore(Gifted, { store, archive: recoveryArchive });
         installMessageRecovery(Gifted, {
             archive: recoveryArchive,
             getSettings: getAllSettings,

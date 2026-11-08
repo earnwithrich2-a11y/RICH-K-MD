@@ -26,4 +26,13 @@ function extractViewOnceMedia(quoted) {
     return null;
 }
 
-module.exports = { extractViewOnceMedia };
+function hasViewOnceMarker(content) {
+    for (let depth = 0; content && depth < 6; depth++) {
+        if (content.viewOnceMessage || content.viewOnceMessageV2 || content.viewOnceMessageV2Extension ||
+            ["imageMessage", "videoMessage", "audioMessage"].some(type => content[type]?.viewOnce)) return true;
+        content = content.ephemeralMessage?.message || content.deviceSentMessage?.message;
+    }
+    return false;
+}
+
+module.exports = { extractViewOnceMedia, hasViewOnceMarker };

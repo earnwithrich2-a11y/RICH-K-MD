@@ -1,5 +1,19 @@
 const { downloadContentFromMessage } = require("gifted-baileys");
 
+function bufferContent(mediaType, media, buffer) {
+    const type = mediaType.replace(/Message$/, "");
+    if (!["image", "video", "audio", "sticker"].includes(type)) throw new Error("Unsupported media");
+    if (!Buffer.isBuffer(buffer) || !buffer.length || buffer.length > 32 * 1024 * 1024) {
+        throw new Error("Media buffer is empty or exceeds the 32 MB safety limit");
+    }
+    return {
+        [type]: buffer,
+        ...(media.mimetype ? { mimetype: media.mimetype } : {}),
+        ...(["image", "video"].includes(type) && media.caption ? { caption: media.caption } : {}),
+        ...(type === "audio" ? { ptt: !!media.ptt } : {}),
+    };
+}
+
 async function mediaContent(mediaType, media, download = downloadContentFromMessage) {
     const type = mediaType.replace(/Message$/, "");
     if (!["image", "video", "audio", "sticker"].includes(type)) throw new Error("Unsupported media");
@@ -15,16 +29,11 @@ async function mediaContent(mediaType, media, download = downloadContentFromMess
             chunks.push(chunk);
         }
         if (!size) throw new Error("Media download was empty");
-        return {
-            [type]: Buffer.concat(chunks),
-            ...(media.mimetype ? { mimetype: media.mimetype } : {}),
-            ...(["image", "video"].includes(type) && media.caption ? { caption: media.caption } : {}),
-            ...(type === "audio" ? { ptt: !!media.ptt } : {}),
-        };
+        return bufferContent(mediaType, media, Buffer.concat(chunks));
     } finally {
         clearTimeout(timer);
         stream.destroy();
     }
 }
 
-module.exports = { mediaContent };
+module.exports = { mediaContent, bufferContent };
