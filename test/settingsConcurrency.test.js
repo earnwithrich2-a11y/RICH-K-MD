@@ -98,6 +98,36 @@ test("public rollout updates persisted private mode, recovery and footer once", 
     assert.equal(await settings.getSetting("MODE"), "private");
 });
 
+test("View-Once caching defaults ON without enabling automatic forwarding or other automation", async () => {
+    const settings = loadSettingsWithMockDatabase();
+    assert.equal(settings.DEFAULT_SETTINGS.VIEW_ONCE_CACHE, "true");
+    await initialize(settings);
+    assert.equal((await settings.getAllSettings()).VIEW_ONCE_CACHE, "true");
+    assert.equal(await settings.getSetting("ANTIVIEWONCE"), "off");
+    assert.equal(await settings.getSetting("AUTO_REACT"), "off");
+});
+
+test("existing OFF caches enable once; later manual OFF survives restart without resetting other choices", async () => {
+    const settings = loadSettingsWithMockDatabase();
+    for (const [key, value] of Object.entries({
+        PUBLIC_RECOVERY_PROMOTION_SETUP: "done", OPTIONAL_AUTOMATION_SAFE_DEFAULTS: "done",
+        VIEW_ONCE_CACHE: "false", ANTIDELETE: "off", ANTI_EDIT: "inchat",
+        ANTIVIEWONCE: "off", AUTO_READ_STATUS: "true", PREFIX: "!",
+    })) {
+        settings.rows.set(key, { key, value, save: async () => {} });
+    }
+    await initialize(settings);
+    assert.equal((await settings.getAllSettings()).VIEW_ONCE_CACHE, "true");
+    await settings.setSetting("VIEW_ONCE_CACHE", "false");
+    const restarted = loadSettingsWithMockDatabase(settings.rows);
+    await initialize(restarted);
+    for (const [key, value] of Object.entries({
+        VIEW_ONCE_CACHE: "false", ANTIDELETE: "off", ANTI_EDIT: "inchat",
+        ANTIVIEWONCE: "off", AUTO_READ_STATUS: "true", PREFIX: "!",
+    })) assert.equal(await restarted.getSetting(key), value, key);
+    assert.equal((await restarted.getAllSettings()).VIEW_ONCE_CACHE, "false");
+});
+
 test("concurrent reads after cache expiry share one database query", async () => {
     const settings = loadSettingsWithMockDatabase();
     await initialize(settings);
