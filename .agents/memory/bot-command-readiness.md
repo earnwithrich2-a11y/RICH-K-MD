@@ -45,8 +45,21 @@ The user confirmed a fresh readable self-chat `.ping` on 2026-10-15 after backgr
 
 **How to apply:** Treat this as confirmation of that fresh self-chat command only, not of every external-service command, historical message, or peer device. Preserve the working login and recovery isolation.
 
-Distinguish the linked WhatsApp account from the configured bot owner.
+Distinguish the linked WhatsApp account from the user's other WhatsApp accounts.
 
-**Why:** Owner settings grant command permissions; they do not change the active WhatsApp login. A separate bot account is valid, but self-chat on another account does not reach it.
+**Why:** Settings do not change the active WhatsApp login. A separate bot account
+is valid, but self-chat on another account does not reach it.
 
-**How to apply:** Verify masked linked-account metadata and which account the user is testing before attributing missing input to library failures or replacing a login. Do not assume differing owner and bot accounts are themselves a configuration error.
+**How to apply:** Verify masked linked-account metadata and which account the user
+is testing before attributing missing input to library failures or replacing a
+login. Do not assume using a separate bot account is itself a configuration error.
+
+For current multi-user deployments, owner permissions must follow the active
+connected account; stale owner settings and built-in developer phone lists must
+not grant access. Explicitly approved sudo identities remain supported.
+
+**Why:** The user subsequently requested dynamic `sock.user.id` ownership and no
+fixed phone numbers because the bot is hosted for multiple users.
+
+**How to apply:** Derive ownership per socket, including authenticated LID aliases,
+and keep configured branding/contact fields distinct from authorization.

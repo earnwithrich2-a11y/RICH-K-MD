@@ -13,6 +13,7 @@ const { ViewOnceCache } = require("./RICHK-MD-core/connection/viewOnceCache");
 const { ViewOnceBuffers } = require("./RICHK-MD-core/connection/viewOncePrefetch");
 const { getGroupSetting } = require("./RICHK-MD-core/database/groupSettings");
 const { getCommandSettings } = require("./RICHK-MD-core/database/settings");
+const { connectedOwnerJid } = require("./RICHK-MD-core/connection/ownerIdentity");
 const { getCachedSudoNumbers } = require("./RICHK-MD-core/database/sudo");
 const { needsGroupMetadata, runWithPresence, serviceUnavailable } = require("./RICHK-MD-core/connection/commandRuntime");
 
@@ -138,6 +139,7 @@ async function resolveRealJid(Gifted, jid) {
 
 const { SESSION_ID: sessionId } = config;
 const PORT = process.env.PORT || 5000;
+let shuttingDown = false;
 const app = express();
 let Gifted;
 let store;
@@ -213,6 +215,7 @@ async function loadBotSettings() {
 startCleanup();
 
 async function startGifted() {
+    if (shuttingDown) return;
     try {
         loadPlugins(pluginsPath, { throwOnError: true });
         const { version } = await fetchLatestWaWebVersion();
@@ -227,7 +230,7 @@ async function startGifted() {
         if (store) store.destroy();
         store = new SQLiteStore();
 
-        const socketConfig = createSocketConfig(version, state, logger);
+        const socketConfig = createSocketConfig(version, state, logger, store);
         let selfRetryTraceUntil = 0;
         const patchMessageBeforeSending = socketConfig.patchMessageBeforeSending;
         socketConfig.patchMessageBeforeSending = (message, jids) => {
@@ -261,6 +264,7 @@ async function startGifted() {
             return patched;
         };
         socketConfig.getMessage = async (key) => {
+            try {
             const result = await findMessageForRetryWithWait(
                 store,
                 key,
@@ -288,6 +292,10 @@ async function startGifted() {
                 }
             }
             return result.message;
+            } catch {
+                console.warn("[WhatsApp] Resend lookup unavailable; saved messages retained.");
+                return undefined;
+            }
         };
 
         Gifted = giftedConnect(socketConfig);
@@ -306,6 +314,7 @@ async function startGifted() {
         });
         installMessageRecovery(Gifted, {
             archive: recoveryArchive,
+            store,
             getSettings: getAllSettings,
             download: downloadMediaMessage,
             revokeType: WAMessageStubType.REVOKE,
@@ -348,13 +357,33 @@ async function startGifted() {
             },
         });
 
-        process.on("SIGINT", () => store?.destroy());
-        process.on("SIGTERM", () => store?.destroy());
     } catch (error) {
         console.error("Socket initialization error:", error);
-        setTimeout(() => startGifted(), 5000);
+        setTimeout(() => startGifted(), 15000);
     }
 }
+
+async function shutdownGifted() {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const deadline = setTimeout(() => process.exit(0), 5000);
+    deadline.unref?.();
+    try {
+        if (Gifted) {
+            Gifted.maintenanceRestarting = true;
+            await Gifted.prepareForMaintenanceRestart?.();
+            await Gifted.end?.(new Error("Application shutdown"));
+        }
+    } catch {
+        console.warn("[WhatsApp] Shutdown cleanup incomplete; saved login retained.");
+    } finally {
+        clearTimeout(deadline);
+        try { store?.destroy(); } catch { /* Exit even if store cleanup fails. */ }
+        process.exit(0);
+    }
+}
+process.once("SIGINT", shutdownGifted);
+process.once("SIGTERM", shutdownGifted);
 
 function setupAutoBio(Gifted) {
     (async () => {
@@ -495,7 +524,8 @@ function setupCommandHandler(Gifted) {
         }
 
         Gifted.commandDiagnostics?.mark("settingsStarted");
-        const settings = getCommandSettings();
+        const activeOwner = connectedOwnerJid(Gifted).split("@")[0];
+        const settings = { ...getCommandSettings(), OWNER_NUMBER: activeOwner };
         Gifted.commandDiagnostics?.mark("settingsLoaded");
         const botId = standardizeJid(Gifted.user?.id || Gifted.authState?.creds?.me?.id);
         const dispatchStartedAt = performance.now();

@@ -14,6 +14,14 @@ DM recovery copies belong in the connected bot account's inbox, not a different 
 
 **How to apply:** Resolve the destination from the authenticated account. Do not change it to the owner setting or introduce participant-wide delivery without a new request.
 
+Even a legacy `inchat` setting must now deliver delete/edit recovery privately.
+
+**Why:** The user explicitly requested both DM and group recoveries in the active
+connected account's inbox, with clean deleted/edited notification headings.
+
+**How to apply:** Preserve OFF toggles and durable retries, but never send a
+recovery copy publicly just because an older deployment retained `inchat`.
+
 Treat the original author and the deletion actor as separate identities.
 
 **Why:** WhatsApp revoke updates can carry the deleter's outgoing flag even when the deleted original was an incoming message from somebody else.

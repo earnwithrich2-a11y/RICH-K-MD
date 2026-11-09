@@ -25,7 +25,7 @@ Module._load = function (request, parent, isMain) {
 try { require(ownerModulePath); } finally { Module._load = originalLoad; }
 const command = registered.find(({ metadata }) => metadata.pattern === "vv");
 
-async function runReveal({ key, quoted, sender, isGroup, alias = "vv", isSuperUser = true, socketOverrides = {} }) {
+async function runReveal({ key, quoted, sender, isGroup, alias = "vv", isSuperUser = true, socketOverrides = {}, contextOverrides = {} }) {
     const sent = [], downloads = [], replies = [];
     const socket = {
         user: { id: "15550000001:4@s.whatsapp.net" },
@@ -41,6 +41,7 @@ async function runReveal({ key, quoted, sender, isGroup, alias = "vv", isSuperUs
     await match.handler(key.remoteJid, socket, {
         mek: { key }, quoted, sender, isGroup, isSuperUser,
         react: async () => {}, reply: async text => replies.push(text),
+        ...contextOverrides,
     });
     return { sent, downloads, replies };
 }
@@ -55,9 +56,33 @@ test("vv sends a full image buffer only to the group requester's private DM with
     });
     assert.equal(result.sent.length, 1);
     assert.equal(result.sent[0][0], "15550000002@s.whatsapp.net");
+    assert.equal(result.replies[0], "✅ View-once sent to your DM.");
     assert.deepEqual(result.sent[0][1].image, Buffer.from("full media"));
     assert.equal(result.sent[0][1].caption, "photo");
     assert.equal(result.downloads[0].media.viewOnce, false);
+});
+
+test("vv and thumbs-up contain download, private-send and acknowledgment failures", async () => {
+    for (const alias of ["vv", "👍"]) {
+        const request = { alias, key: { remoteJid: "15550000002@s.whatsapp.net" },
+            sender: "15550000002@s.whatsapp.net",
+            quoted: { imageMessage: { url: "https://example.test/photo", viewOnce: true } } };
+        const expired = await runReveal({ ...request, socketOverrides: {
+            testDownload: async () => { throw new Error("No valid media URL or directPath present in message"); },
+        } });
+        assert.equal(expired.replies[0], "❌ This view-once media has expired or was already opened.");
+        assert.equal(expired.sent.length, 0);
+        const failedSend = await runReveal({ ...request, socketOverrides: {
+            sendMessage: async () => { throw new Error("offline"); },
+        } });
+        assert.match(failedSend.replies[0], /Could not deliver/);
+        await assert.doesNotReject(runReveal({ ...request, socketOverrides: {
+            sendMessage: async () => { throw new Error("offline"); },
+        }, contextOverrides: { reply: async () => { throw new Error("offline"); } } }));
+        const failedAck = await runReveal({ ...request,
+            contextOverrides: { reply: async () => { throw new Error("offline"); } } });
+        assert.equal(failedAck.sent.length, 1, "confirmation failures do not resend or leak media");
+    }
 });
 
 test("thumbs-up alias privately sends a modern extension video buffer to the connected account", async () => {
@@ -113,6 +138,6 @@ test("vv reports unavailable opened media without exposing raw URL/path errors",
         sender: "15550000002@s.whatsapp.net",
     });
     assert.equal(result.sent.length, 0);
-    assert.match(result.replies[0], /no longer available/);
+    assert.equal(result.replies[0], "❌ This view-once media has expired or was already opened.");
     assert.doesNotMatch(result.replies[0], /No valid media URL|directPath/);
 });

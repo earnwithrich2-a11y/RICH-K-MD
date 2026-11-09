@@ -18,7 +18,7 @@ function fixture(options = {}) {
         logout() { throw new Error("Logout must never be used"); },
     };
     const context = {
-        m: { key: { fromMe: false } }, sender: "15550000001@s.whatsapp.net",
+        m: { key: { fromMe: false } }, sender: "15550000002@s.whatsapp.net",
         ownerNumber: "15550000001", getSudoNumbers: async () => ["15550000003"],
         reply: async text => { replies.push(text); events.push(`reply:${text}`); },
     };
@@ -48,11 +48,12 @@ function fixture(options = {}) {
     return { service, socket, context, events, replies, commands };
 }
 
-test("only owner, connected number/fromMe and explicit sudo are authorized, never broad developer privileges", async () => {
+test("only connected number/fromMe and explicit sudo are authorized, never stale owner or developer privileges", async () => {
     const f = fixture();
-    for (const sender of ["15550000001@s.whatsapp.net", "15550000002@s.whatsapp.net", "synthetic-own@lid", "15550000003@s.whatsapp.net"]) {
+    for (const sender of ["15550000002@s.whatsapp.net", "synthetic-own@lid", "15550000003@s.whatsapp.net"]) {
         assert.equal(await isMaintenanceOwner(f.socket, { ...f.context, sender }), true);
     }
+    assert.equal(await isMaintenanceOwner(f.socket, { ...f.context, sender: "15550000001@s.whatsapp.net" }), false);
     assert.equal(await isMaintenanceOwner(f.socket, { ...f.context, sender: "15550000099@s.whatsapp.net", isSuperUser: true }), false);
     assert.equal(await isMaintenanceOwner(f.socket, { ...f.context, sender: "15550000099@s.whatsapp.net", m: { key: { fromMe: true } } }), true);
     assert.equal(await isMaintenanceOwner(f.socket, { ...f.context, sender: "15550000004@s.whatsapp.net", sudoNumbers: "+15550000004", getSudoNumbers: async () => { throw Error("offline"); } }), true);

@@ -238,21 +238,17 @@ gmd(
     aliases: ["ownernumber", "ownernum", "mynumber"],
     react: "⚙️",
     category: "owner",
-    description: "Set owner number",
+    description: "Show the owner detected from the connected account",
   },
   async (from, Gifted, conText) => {
     const { q, reply, react, isSuperUser } = conText;
     if (!isSuperUser) return reply("❌ Owner Only Command!");
-    if (!q) return reply("❌ Please provide an owner number!");
     try {
-      const num = q.replace(/\D/g, "");
-      const current = await getSetting("OWNER_NUMBER");
-      if (current === num) {
-        return reply(`⚠️ Owner number is already set to: *${num}*`);
-      }
-      await setSetting("OWNER_NUMBER", num);
+      const { connectedOwnerJid } = require("../RICHK-MD-core/connection/ownerIdentity");
+      const num = connectedOwnerJid(Gifted).split("@")[0];
+      if (!num) return await reply("The connected owner is unavailable. Please try again later.");
       await react("✅");
-      await reply(`✅ Owner number set to: *${num}*`);
+      await reply(`Connected owner: *${num}*\nThe owner is detected automatically from the active WhatsApp account.`);
     } catch (error) {
       await reply(`❌ Error: ${error.message}`);
     }

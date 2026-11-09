@@ -5,15 +5,12 @@ const { getSudoNumbers } = require("../database/sudo");
 const { sendButtons } = require("gifted-btns");
 const { cachedGroupMetadata, getLidMapping } = require("./groupCache");
 
-const DEV_NUMBERS = ['254715206562', '254747746851', '254114018035', '254728782591', '254799916673', '254762016957', '254113174209'];
+const { isConnectedOwner } = require("./ownerIdentity");
 
 const isSuperUser = async (jid, Gifted) => {
     if (!jid) return false;
     const num = jid.split("@")[0].split(":")[0];
-    const ownerNumber = await getSetting("OWNER_NUMBER");
-    const botNum = Gifted.user?.id?.split(":")[0];
-    if (num === ownerNumber || num === botNum) return true;
-    if (DEV_NUMBERS.includes(num)) return true;
+    if (isConnectedOwner(Gifted, jid)) return true;
     const sudoNumbers = await getSudoNumbers();
     return sudoNumbers.includes(num);
 };

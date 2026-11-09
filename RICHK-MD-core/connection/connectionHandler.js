@@ -1,13 +1,8 @@
 const { Boom } = require("@hapi/boom");
 const { DisconnectReason } = require("gifted-baileys");
-const fs = require("fs-extra");
-const path = require("path");
 const { setupGroupCacheListeners } = require("./groupCache");
 
-const RECONNECT_DELAY = 5000;
-const MAX_RECONNECT_ATTEMPTS = 50;
-
-let reconnectAttempts = 0;
+const RECONNECT_DELAY = 15000;
 
 const safeNewsletterFollow = async (Gifted, newsletterJid) => {
     if (!newsletterJid) return false;
@@ -70,8 +65,7 @@ const setupConnectionHandler = (
     };
     const handleReconnect = () => {
         if (reconnectTimer !== null || reconnecting || retired) return;
-        reconnectAttempts = Math.min(reconnectAttempts + 1, MAX_RECONNECT_ATTEMPTS);
-        const delay = Math.min(RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1), 300000);
+        const delay = RECONNECT_DELAY;
         console.info(`[WhatsApp] Reconnecting in ${delay}ms.`);
         reconnectTimer = schedule(async () => {
             reconnectTimer = null;
@@ -102,7 +96,6 @@ const setupConnectionHandler = (
             cancelReconnect();
             isOpen = true;
             console.log("✅ Connection Instance is Online");
-            reconnectAttempts = 0;
 
             if (callbacks.onOpen) {
                 try { await callbacks.onOpen(Gifted); }
@@ -119,56 +112,14 @@ const setupConnectionHandler = (
             const reason = new Boom(lastDisconnect?.error)?.output?.statusCode;
             console.log(`Connection closed due to: ${reason}`);
 
-            if ([408, 428, 503, 515].includes(reason)) {
+            if (reason === DisconnectReason.loggedOut) {
+                cancelReconnect();
+                retired = true;
+                console.log("WhatsApp reported a logout. Login data is preserved; re-pairing requires approval.");
+                Gifted.authRequired = true;
+            } else {
+                // Includes badSession/500: retry without clearing any saved credentials.
                 handleReconnect();
-                return;
-            }
-
-            switch (reason) {
-                case DisconnectReason.badSession:
-                    cancelReconnect();
-                    retired = true;
-                    console.log(
-                        "WhatsApp rejected the session. Login data is preserved; re-pairing requires approval.",
-                    );
-                    Gifted.authRequired = true;
-                    break;
-
-                case DisconnectReason.connectionReplaced:
-                    cancelReconnect();
-                    retired = true;
-                    console.log(
-                        "Connection replaced, another new session opened",
-                    );
-                    Gifted.connectionReplaced = true;
-                    break;
-
-                case DisconnectReason.loggedOut:
-                    cancelReconnect();
-                    retired = true;
-                    console.log(
-                        "WhatsApp reported a logout. Login data is preserved; re-pairing requires approval.",
-                    );
-                    Gifted.authRequired = true;
-                    break;
-
-                case DisconnectReason.connectionClosed:
-                case DisconnectReason.connectionLost:
-                case DisconnectReason.restartRequired:
-                    console.log("🕗 Reconnecting...");
-                    handleReconnect();
-                    break;
-
-                case DisconnectReason.timedOut:
-                    console.log("Connection timed out, reconnecting...");
-                    handleReconnect();
-                    break;
-
-                default:
-                    console.log(
-                        `Unknown disconnect reason: ${reason}, attempting reconnection...`,
-                    );
-                    handleReconnect();
             }
         }
     });
@@ -179,5 +130,4 @@ module.exports = {
     safeGroupAcceptInvite,
     setupConnectionHandler,
     RECONNECT_DELAY,
-    MAX_RECONNECT_ATTEMPTS,
 };

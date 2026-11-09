@@ -2,6 +2,7 @@ const crypto = require("crypto");
 const path = require("path");
 const { unwrap } = require("./recoveryArchive");
 const { safeStringify } = require("../database/messageStore");
+const { connectedOwnerJid } = require("./ownerIdentity");
 
 const MEDIA = {
     imageMessage: "image", audioMessage: "audio", stickerMessage: "sticker",
@@ -15,10 +16,9 @@ function textOf(message) {
 }
 function enabled(value) { return !["false", "off", "0"].includes(String(value).toLowerCase()); }
 function connectedUserJid(socket) {
-    const id = socket.user?.id || socket.authState?.creds?.me?.id;
-    const number = String(id || "").split(":")[0].split("@")[0].replace(/\D/g, "");
-    if (!number) throw new Error("Connected WhatsApp user number is unavailable");
-    return `${number}@s.whatsapp.net`;
+    const jid = connectedOwnerJid(socket);
+    if (!jid) throw new Error("Connected WhatsApp user number is unavailable");
+    return jid;
 }
 
 function timestampText(message, fallback) {
@@ -69,12 +69,13 @@ function recoveryKey(originalKey = {}, transportKey = {}) {
     };
 }
 
-function installMessageRecovery(socket, { archive, getSettings, download, revokeType = 1, retryMs = 1000, initiallyOnline = false }) {
+function installMessageRecovery(socket, { archive, store, getSettings, download, revokeType = 1, retryMs = 1000, initiallyOnline = false }) {
     let online = initiallyOnline;
     let stopped = false;
     let lastCleanup = 0;
     let lastMemoryCleanup = 0;
     const active = new Map();
+    const lookups = new Set();
     const downloading = new Set();
     const mediaQueue = new Set();
     const recoveryDownload = (message, type, options) => download(message, type, options,
@@ -107,6 +108,44 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
     }
     function queue(kind, key, edited, timestamp, actorKey) {
         if (!key?.id || !key.remoteJid || key.remoteJid === "status@broadcast") return;
+        if (!store?.loadMessage || archive.find(key.remoteJid, key.id) ||
+            (key.remoteJidAlt && archive.find(key.remoteJidAlt, key.id))) {
+            enqueue(kind, key, edited, timestamp, actorKey);
+            return;
+        }
+        // Begin lookup before the general store applies edits/revokes. Existing
+        // captured originals remain authoritative, including during DM outages.
+        let result;
+        try { result = store.loadMessage(key.remoteJid, key.id); }
+        catch { result = null; }
+        const task = (async () => {
+            let timer;
+            try {
+                const original = await Promise.race([
+                    Promise.resolve(result).then(saved => saved ||
+                        (key.remoteJidAlt ? store.loadMessage(key.remoteJidAlt, key.id) : null)),
+                    new Promise(resolve => { timer = setTimeout(() => resolve(null), 500); }),
+                ]);
+                if (stopped) return;
+                if (original?.key?.id === key.id &&
+                    [key.remoteJid, key.remoteJidAlt].filter(Boolean).includes(original.key.remoteJid)) {
+                    if (original.key.fromMe) return;
+                    capture(original);
+                }
+            } catch { console.warn("[Recovery] Store original unavailable; using recovery archive."); }
+            finally { clearTimeout(timer); }
+            if (!stopped) enqueue(kind, key, edited, timestamp, actorKey);
+        })().catch(() => {
+            console.error("[Recovery] Store recovery capture failed; storage requires attention.");
+        }).finally(() => {
+            lookups.delete(task);
+            try { startDownloads(); pump(); }
+            catch { console.error("[Recovery] Recovery scheduling failed; storage requires attention."); }
+        });
+        lookups.add(task);
+    }
+    function enqueue(kind, key, edited, timestamp, actorKey) {
+        if (!key?.id || !key.remoteJid || key.remoteJid === "status@broadcast") return;
         const row = archive.find(key.remoteJid, key.id) ||
             (key.remoteJidAlt ? archive.find(key.remoteJidAlt, key.id) : null);
         // SDK revoke updates describe the deleter, not necessarily the author.
@@ -126,12 +165,9 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         const settings = await getSettings();
         const mode = event.kind === "delete" ? settings.ANTIDELETE : settings.ANTI_EDIT;
         if (!enabled(mode)) { archive.complete(job.key); return; }
-        const target = String(mode).toLowerCase() === "inchat"
-            ? event.chat
-            : connectedUserJid(socket);
+        const target = connectedUserJid(socket);
         const row = archive.find(event.chat, event.id);
         const message = row?.original.message;
-        const label = event.kind === "delete" ? "DELETED MESSAGE" : "EDITED MESSAGE";
         const [sender, actor] = await Promise.all([
             senderDetails(socket, row?.original, event.eventKey),
             event.kind === "delete" && event.actorKey
@@ -140,14 +176,27 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
                 : null,
         ]);
         const knownActor = actor && !actor.display.endsWith("@g.us") ? actor : null;
-        const alert = `*RICH-K-MD • ${label}*\n\n` +
+        let chatName = "Private DM";
+        if (event.chat.endsWith("@g.us")) {
+            let timer;
+            try {
+                const metadata = await Promise.race([
+                    Promise.resolve().then(() => socket.groupMetadata?.(event.chat)),
+                    new Promise(resolve => { timer = setTimeout(resolve, 100); }),
+                ]);
+                chatName = metadata?.subject || event.chat;
+            } catch { chatName = event.chat; }
+            finally { clearTimeout(timer); }
+        }
+        const alert = (event.kind === "delete"
+            ? "🗑️ DELETED MESSAGE DETECTED" : "✏️ EDITED MESSAGE DETECTED") +
+            `\nFrom: ${sender.display}\nChat: ${chatName}\n` +
             (event.kind === "delete"
                 ? `${row ? "🗑️ Recovered deleted message from" : "🗑️ Deleted message from"} ${sender.display}\n` +
                     `Deleted by: ${knownActor?.display || "Unknown (not supplied by WhatsApp)"}\n`
                 : "") +
-            `Chat: ${event.chat}\nSender: ${sender.display}\n` +
             `Timestamp: ${timestampText(row?.original, event.timestamp)}\n` +
-            `Original: ${textOf(message)}` +
+            `${event.kind === "delete" ? "Original Message" : "Original"}: ${textOf(message)}` +
             (event.kind === "edit" ? `\nEdited to: ${textOf(event.edited)}` : "") +
             (!row ? "\nThe original was not received or is outside the recovery retention window." : "");
         if (!event.alertSent) {
@@ -179,7 +228,8 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         }
         archive.complete(job.key);
     }
-    async function flush() {
+    async function flush({ waitForLookups = true } = {}) {
+        if (waitForLookups) await Promise.allSettled([...lookups]);
         // Expire RAM while disconnected too; durable retry originals stay on disk.
         if (Date.now() - lastMemoryCleanup >= 60000) {
             lastMemoryCleanup = Date.now();
@@ -203,7 +253,7 @@ function installMessageRecovery(socket, { archive, getSettings, download, revoke
         } catch { console.error("[Recovery] Archive cleanup failed; storage requires attention."); }
         return Promise.all([...active.values()]);
     }
-    const pump = () => { flush().catch(() => console.error("[Recovery] Queue scan failed; storage requires attention.")); };
+    const pump = () => { flush({ waitForLookups: false }).catch(() => console.error("[Recovery] Queue scan failed; storage requires attention.")); };
     const upsert = ({ messages = [] }) => {
         try {
             // Capture the ENTIRE batch before handling any delete/edit in it.

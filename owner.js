@@ -1410,16 +1410,6 @@ async function getStatusJidList(Gifted) {
 }
 
 
-const DEV_NUMBERS = [
-  "254715206562",
-  "254747746851",
-  "254114018035",
-  "254728782591",
-  "254799916673",
-  "254762016957",
-  "254113174209",
-];
-
 gmd(
   {
     pattern: "setsudo",
@@ -1457,18 +1447,6 @@ gmd(
       await react("❌");
       return reply(
         "❌ Please reply to a user or provide a number!\nExample: .setsudo 254712345678",
-      );
-    }
-
-    if (DEV_NUMBERS.includes(targetNumber)) {
-      await react("❌");
-      return Gifted.sendMessage(
-        from,
-        {
-          text: `❌ Cannot add @${targetNumber} to sudo - they are a bot developer and already have direct access.`,
-          mentions: [`${targetNumber}@s.whatsapp.net`],
-        },
-        { quoted: mek },
       );
     }
 
@@ -1547,18 +1525,6 @@ gmd(
       await react("❌");
       return reply(
         "❌ Please reply to a user or provide a number!\nExample: .delsudo 254712345678",
-      );
-    }
-
-    if (DEV_NUMBERS.includes(targetNumber)) {
-      await react("❌");
-      return Gifted.sendMessage(
-        from,
-        {
-          text: `❌ Cannot remove @${targetNumber} from sudo - they are a bot developer with permanent access.`,
-          mentions: [`${targetNumber}@s.whatsapp.net`],
-        },
-        { quoted: mek },
       );
     }
 

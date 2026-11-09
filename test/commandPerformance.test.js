@@ -90,7 +90,7 @@ test("view-once reveals use a private recipient rather than the current group", 
         viewOnceHandler,
         /const destination = await resolvePrivateRecipient\s*\(/,
     );
-    assert.match(viewOnceHandler, /if \(!destination\) return reply\(/);
+    assert.match(viewOnceHandler, /if \(!destination\) return await reply\(/);
     assert.match(viewOnceHandler, /await Gifted\.sendMessage\(destination, msg\);/);
 });
 
