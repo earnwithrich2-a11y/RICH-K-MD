@@ -3,7 +3,7 @@ const { extractViewOnceMedia } = require("./viewOnceMedia");
 const { mediaContent } = require("./automationMedia");
 const { MIN_RETENTION_MS } = require("./viewOnceCache");
 
-const keyOf = message => `${message.key.remoteJid}\0${message.key.id}`;
+const keyOf = message => message.key.id;
 
 // Background media bytes, separate from the always-on metadata cache and recovery.
 class ViewOnceBuffers {
@@ -40,9 +40,7 @@ class ViewOnceBuffers {
         this.bytes += buffer.length;
     }
     find(chat, id) {
-        const row = this.entries.get(`${chat}\0${id}`) ||
-            [...this.entries.values()].find(value =>
-                value.original.key.id === id && value.original.key.remoteJidAlt === chat);
+        const row = this.entries.get(id || chat);
         return row && row.expires > this.now() ? row : null;
     }
     getMessage(chat, id) {
@@ -118,8 +116,7 @@ function createViewOncePrefetch(socket, { buffers, getSettings, save = mediaCont
     }
     async function wait(chat, id) {
         if (!await enabled()) { buffers.clear(); return null; }
-        const row = pending.get(`${chat}\0${id}`) || [...pending.values()].find(value =>
-            value.original.key.id === id && value.original.key.remoteJidAlt === chat);
+        const row = pending.get(id || chat);
         if (row) {
             let timer;
             try {

@@ -86,12 +86,9 @@ test("view-once reveals use a private recipient rather than the current group", 
         'pattern: "vv",',
         'pattern: "disapp",',
     );
-    assert.match(
-        viewOnceHandler,
-        /const destination = await resolvePrivateRecipient\s*\(/,
-    );
-    assert.match(viewOnceHandler, /if \(!destination\) return await reply\(/);
-    assert.match(viewOnceHandler, /await Gifted\.sendMessage\(destination, msg\);/);
+    assert.match(viewOnceHandler, /silent: true/);
+    assert.match(viewOnceHandler, /saveViewOnceSilently\(Gifted, conText/);
+    assert.doesNotMatch(viewOnceHandler, /await (?:reply|react)\(/);
 });
 
 test("reply helpers return their send promise so awaited replies finish", () => {

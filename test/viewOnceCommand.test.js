@@ -37,16 +37,17 @@ async function runReveal({ key, quoted, sender, isGroup, alias = "vv", isSuperUs
         ...socketOverrides,
     };
     const match = registered.find(({ metadata }) => metadata.pattern === alias || metadata.aliases?.includes(alias));
-    assert.equal(match, command);
+    assert.ok(match);
+    assert.equal(match.metadata.silent, true);
     await match.handler(key.remoteJid, socket, {
         mek: { key }, quoted, sender, isGroup, isSuperUser,
-        react: async () => {}, reply: async text => replies.push(text),
+        react: async () => assert.fail("No source-chat reaction is allowed"), reply: async text => replies.push(text),
         ...contextOverrides,
     });
     return { sent, downloads, replies };
 }
 
-test("vv sends a full image buffer only to the group requester's private DM without promotional text", async () => {
+test("vv silently sends a full image buffer only to the connected owner's DM, never the group requester", async () => {
     const result = await runReveal({
         key: { remoteJid: "test-group@g.us", participantPn: "15550000002@s.whatsapp.net" },
         quoted: { viewOnceMessageV2: { message: {
@@ -55,8 +56,8 @@ test("vv sends a full image buffer only to the group requester's private DM with
         sender: "test-group@g.us", isGroup: true,
     });
     assert.equal(result.sent.length, 1);
-    assert.equal(result.sent[0][0], "15550000002@s.whatsapp.net");
-    assert.equal(result.replies[0], "✅ View-once sent to your DM.");
+    assert.equal(result.sent[0][0], "15550000001@s.whatsapp.net");
+    assert.deepEqual(result.replies, []);
     assert.deepEqual(result.sent[0][1].image, Buffer.from("full media"));
     assert.equal(result.sent[0][1].caption, "photo");
     assert.equal(result.downloads[0].media.viewOnce, false);
@@ -70,12 +71,12 @@ test("vv and thumbs-up contain download, private-send and acknowledgment failure
         const expired = await runReveal({ ...request, socketOverrides: {
             testDownload: async () => { throw new Error("No valid media URL or directPath present in message"); },
         } });
-        assert.equal(expired.replies[0], "❌ This view-once media has expired or was already opened.");
+        assert.deepEqual(expired.replies, []);
         assert.equal(expired.sent.length, 0);
         const failedSend = await runReveal({ ...request, socketOverrides: {
             sendMessage: async () => { throw new Error("offline"); },
         } });
-        assert.match(failedSend.replies[0], /Could not deliver/);
+        assert.deepEqual(failedSend.replies, []);
         await assert.doesNotReject(runReveal({ ...request, socketOverrides: {
             sendMessage: async () => { throw new Error("offline"); },
         }, contextOverrides: { reply: async () => { throw new Error("offline"); } } }));
@@ -103,21 +104,21 @@ test("vv downloads complete view-once audio and preserves voice-note metadata in
             audioMessage: { url: "https://example.test/audio", mimetype: "audio/ogg; codecs=opus", ptt: true },
         } } } } }, isGroup: false,
     });
-    assert.equal(result.sent[0][0], "15550000002@s.whatsapp.net");
+    assert.equal(result.sent[0][0], "15550000001@s.whatsapp.net");
     assert.deepEqual(result.sent[0][1].audio, Buffer.from("full media"));
     assert.equal(result.sent[0][1].ptt, true);
     assert.equal(result.sent[0][1].mimetype, "audio/ogg; codecs=opus");
 });
 
-test("no media is downloaded or leaked when a group requester's private identity is unknown", async () => {
+test("an unknown group requester identity never changes delivery away from the bot owner's inbox", async () => {
     const result = await runReveal({
         key: { remoteJid: "test-group@g.us" },
         quoted: { imageMessage: { url: "https://example.test/photo", viewOnce: true } },
         sender: "test-group@g.us", isGroup: true,
     });
-    assert.equal(result.sent.length, 0);
-    assert.equal(result.downloads.length, 0);
-    assert.match(result.replies[0], /No media was sent/);
+    assert.equal(result.sent.length, 1);
+    assert.equal(result.sent[0][0], "15550000001@s.whatsapp.net");
+    assert.deepEqual(result.replies, []);
 });
 
 test("view-once access restrictions are preserved for both aliases", async () => {
@@ -126,18 +127,28 @@ test("view-once access restrictions are preserved for both aliases", async () =>
         quoted: { imageMessage: { url: "https://example.test/photo", viewOnce: true } },
         sender: "15550000002@s.whatsapp.net", isSuperUser: false,
     });
-    assert.match(result.replies[0], /Owner Only/);
+    assert.deepEqual(result.replies, []);
     assert.equal(result.sent.length, 0);
     assert.equal(result.downloads.length, 0);
 });
 
-test("vv reports unavailable opened media without exposing raw URL/path errors", async () => {
+test("vv silently contains unavailable media without exposing any failure text", async () => {
     const result = await runReveal({
         key: { remoteJid: "15550000002@s.whatsapp.net" },
         quoted: { viewOnceMessageV2: { message: { imageMessage: {} } } },
         sender: "15550000002@s.whatsapp.net",
     });
     assert.equal(result.sent.length, 0);
-    assert.equal(result.replies[0], "❌ This view-once media has expired or was already opened.");
-    assert.doesNotMatch(result.replies[0], /No valid media URL|directPath/);
+    assert.deepEqual(result.replies, []);
+});
+
+test("every reveal alias remains silent when used without a recoverable original", async () => {
+    for (const alias of ["vv", "👍", "vv2", "reveal", "reveal2"]) {
+        const result = await runReveal({
+            alias, key: { remoteJid: "source@g.us", participant: "200@s.whatsapp.net" },
+            quoted: { imageMessage: { viewOnce: true } }, sender: "200@s.whatsapp.net", isGroup: true,
+        });
+        assert.deepEqual(result.sent, []);
+        assert.deepEqual(result.replies, []);
+    }
 });

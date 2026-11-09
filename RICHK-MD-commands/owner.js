@@ -10,8 +10,8 @@ const {
   getGroupMetadata,
   cachedGroupMetadata,
 } = require("../RICHK-MD-core/connection/groupCache");
-const { resolvePrivateRecipient } = require("../RICHK-MD-core/connection/privateRecipient");
 const { recoverViewOnce } = require("../RICHK-MD-core/connection/viewOnceDownload");
+const { saveViewOnceSilently } = require("../RICHK-MD-core/connection/viewOnceDelivery");
 
 const pendingCmdFiles = new Map();
 
@@ -555,99 +555,12 @@ gmd(
   {
     pattern: "vv2",
     aliases: ["‎2", "reveal2"],
-    react: "🙄",
+    silent: true,
     category: "owner",
     description: "Save a quoted view-once image, video or audio to your private inbox.",
   },
   async (from, Gifted, conText) => {
-    const { mek, reply, quoted, react, botName, isSuperUser } = conText;
-
-    if (!quoted) return reply(`Please reply to/quote a ViewOnce message`);
-    if (!isSuperUser) return reply(`Owner Only Command!`);
-
-    let viewOnceContent, mediaType;
-
-    if (
-      quoted.imageMessage?.viewOnce ||
-      quoted.videoMessage?.viewOnce ||
-      quoted.audioMessage?.viewOnce
-    ) {
-      mediaType = Object.keys(quoted).find(
-        (key) =>
-          key.endsWith("Message") &&
-          ["image", "video", "audio"].some((t) => key.includes(t)),
-      );
-      viewOnceContent = { [mediaType]: quoted[mediaType] };
-    } else if (quoted.viewOnceMessage) {
-      viewOnceContent = quoted.viewOnceMessage.message;
-      mediaType = Object.keys(viewOnceContent).find(
-        (key) =>
-          key.endsWith("Message") &&
-          ["image", "video", "audio"].some((t) => key.includes(t)),
-      );
-    } else {
-      return reply("Please reply to a view once media message.");
-    }
-
-    if (!mediaType) return reply("Unsupported ViewOnce message type.");
-
-    let msg;
-    let tempFilePath = null;
-
-    try {
-      const mediaMessage = {
-        ...viewOnceContent[mediaType],
-        viewOnce: false,
-      };
-
-      const path = require("path");
-      const tempDir = path.join(__dirname, "..", "RICHK-MD-core", "temp");
-      const tempFileName = `vv2_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      tempFilePath = await Gifted.downloadAndSaveMediaMessage(
-        mediaMessage,
-        path.join(tempDir, tempFileName),
-      );
-
-      const originalCaption = mediaMessage.caption || "";
-      const caption = originalCaption
-        ? `${originalCaption}\n\n> *REVEALED BY ${botName}*`
-        : `> *REVEALED BY ${botName}*`;
-      const mime = mediaMessage.mimetype || "";
-
-      if (mediaType.includes("image")) {
-        msg = {
-          image: { url: tempFilePath },
-          caption,
-          mimetype: mime,
-        };
-      } else if (mediaType.includes("video")) {
-        msg = {
-          video: { url: tempFilePath },
-          caption,
-          mimetype: mime,
-        };
-      } else if (mediaType.includes("audio")) {
-        msg = {
-          audio: { url: tempFilePath },
-          ptt: true,
-          mimetype: mime || "audio/mp4",
-        };
-      }
-
-      await Gifted.sendMessage(from, msg);
-      await react("✅");
-    } catch (e) {
-      console.error("Error in vv2 command:", e);
-      reply(`Error: ${e.message}`);
-    } finally {
-      if (tempFilePath) {
-        try {
-          await fs.unlink(tempFilePath);
-        } catch (cleanupError) {
-          console.error("Failed to clean up temp file:", cleanupError);
-        }
-      }
-    }
+    return saveViewOnceSilently(Gifted, conText, { recover: recoverViewOnce });
   },
 );
 
@@ -655,39 +568,12 @@ gmd(
   {
     pattern: "vv",
     aliases: ["👍", "‎", "reveal"],
-    react: "🙄",
+    silent: true,
     category: "owner",
     description: "Reveal View Once Media",
   },
   async (from, Gifted, conText) => {
-    const { mek, reply, react, isSuperUser, sender, isGroup } = conText;
-
-    let delivered = false;
-    try {
-      if (!isSuperUser) return await reply(`Owner Only Command!`);
-      const destination = await resolvePrivateRecipient({
-        message: mek,
-        from,
-        sender,
-        isGroup,
-        socket: Gifted,
-      });
-      if (!destination) return await reply("Could not identify your private chat. No media was sent.");
-      const msg = await recoverViewOnce(Gifted, conText);
-      await Gifted.sendMessage(destination, msg);
-      delivered = true;
-      await reply("✅ View-once sent to your DM.");
-      await react("✅");
-    } catch (e) {
-      console.warn("[ViewOnce] Private media recovery or delivery failed.");
-      if (delivered) return; // A failed acknowledgment must not report a failed media delivery.
-      const notice = e?.message?.startsWith("Please reply") ? e.message
-        : e?.message?.startsWith("This view-once") || /No valid media URL|directPath/.test(e?.message || "")
-          ? "❌ This view-once media has expired or was already opened."
-          : "Could not deliver the recovered media privately. Please try again.";
-      try { await reply(notice); }
-      catch { console.warn("[ViewOnce] Failure acknowledgment unavailable; socket kept running."); }
-    }
+    return saveViewOnceSilently(Gifted, conText, { recover: recoverViewOnce });
   },
 );
 

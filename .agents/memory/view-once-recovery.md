@@ -3,14 +3,16 @@ name: View-once recovery and privacy
 description: Why opened view-once recovery needs saved originals, and why manual recovery must stay in private inboxes.
 ---
 
-Manual view-once recovery must send recovered media to the requester's private
-inbox, never fall back to posting it into the source group/chat.
+Manual view-once recovery must send recovered media only to the connected bot
+owner's private inbox, never to the requester or source group/peer.
 
-**Why:** The user explicitly clarified that `.vv` and `.👍` must keep recovered
-images, videos and audio private, including when invoked in a group.
+**Why:** The user subsequently required owner-only delivery and clean target chats
+so contacts do not receive recovery errors or discover a save from bot responses.
 
-**How to apply:** Resolve the private recipient before downloading and preserve
-existing access checks. Failed private delivery is not permission to send publicly.
+**How to apply:** Resolve the connected owner before downloading and preserve
+owner/approved-sudo command access. Fail silently. Do not send success notices,
+error text, prefix reactions or reveal reactions into the source chat. Owner-authored
+👍 reactions may trigger saving, but bot-generated reaction echoes must not loop.
 
 Opening a view-once message on a phone can leave its quote without download
 metadata. Recovery may still work from a saved original or previously downloaded
@@ -20,10 +22,11 @@ bytes, but cannot be guaranteed after both the bot's copy and server media are g
 archives may also unwrap the original envelope, losing the wrapper-only view-once
 marker even while retaining the media and bytes.
 
-**How to apply:** Use chat-scoped original lookups, combine the quote's marker
+**How to apply:** Use ID-only manual recovery caches, combine the quote's marker
 with the saved original's media type, prefer existing bytes, and attempt native
-media refresh only when keys are available. Never search by message ID across
-unrelated chats or promise reconstruction of media the bot never received.
+media refresh only when keys are available. Do not generalize this manual cache
+policy to Anti-Delete or Signal resends, and never promise reconstruction of media
+the bot never received.
 
 An unavailable/expired reply is not evidence that the sender opened the media.
 
@@ -34,8 +37,8 @@ changes could miss a saved original.
 
 **How to apply:** Reproduce source-selection failures before changing retention
 or blaming expiry. Preserve complete alternative sources without mixing keys and
-paths from different versions. Use both authenticated self identities only for a
-genuine self-chat, not merely because a peer-chat command is outgoing. Diagnose
+paths from different versions. Keep manual ID lookup independent of JID spelling,
+while restricting all delivery to the connected owner. Diagnose
 missing keys separately from download errors without logging private metadata.
 
 Some SDK message-level download helpers reject media that has only directPath,
@@ -55,8 +58,18 @@ and requested a separate incoming-message metadata cache lasting at least 15 min
 
 **How to apply:** Capture full envelopes synchronously before other listeners can
 normalize them; preserve good keys against stripped retransmissions. Look up the
-normal chat-scoped store first, then the independent snapshot. Socket reconnection
+independent snapshot by target message ID alone first, then durable stores. Socket reconnection
 must not shorten the process-wide retention window or change private delivery.
+
+The manual View-Once cache must use message IDs alone, not chat+ID keys or a
+chat-filtered sub-index. This also applies to cached bytes and pending downloads.
+
+**Why:** The user explicitly requested direct ID lookup to avoid JID/LID mismatch
+in all chats. This supersedes the earlier manual chat-scoping rule.
+
+**How to apply:** Extract the target stanza ID for commands/reactions and consult
+the owner-only ID Map directly. Preserve collision safety, expiry and byte limits
+without reintroducing a JID requirement.
 
 Keeping full keys is not equivalent to keeping recoverable media bytes.
 

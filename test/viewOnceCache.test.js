@@ -61,7 +61,7 @@ test("full metadata is synchronously captured for every message before downstrea
     }
 });
 
-test("store.loadMessage(chat, quoted.id) takes priority over a memory copy and accepts async stores", async t => {
+test("ID-only cache lookup wins across JID changes, with async store fallback when no cached original exists", async t => {
     const lookups = [];
     const fromStore = original();
     fromStore.message.viewOnceMessageV2Extension.message.imageMessage.directPath = "/store-first";
@@ -70,7 +70,12 @@ test("store.loadMessage(chat, quoted.id) takes priority over a memory copy and a
     });
     cache.capture(original());
     const result = await socket.viewOnceStore.getMessage("100@s.whatsapp.net", "original");
-    assert.equal(result.message.viewOnceMessageV2Extension.message.imageMessage.directPath, "/store-first");
+    assert.equal(result.message.viewOnceMessageV2Extension.message.imageMessage.directPath, "/100@s.whatsapp.net/original");
+    assert.deepEqual(lookups, []);
+    assert.ok(socket.viewOnceStore.getById("original"));
+    cache.byId.clear();
+    const fallback = await socket.viewOnceStore.getMessage("100@s.whatsapp.net", "original");
+    assert.equal(fallback.message.viewOnceMessageV2Extension.message.imageMessage.directPath, "/store-first");
     assert.deepEqual(lookups, [["100@s.whatsapp.net", "original"]]);
     assert.deepEqual(reads, []);
 });
@@ -141,16 +146,18 @@ test("a later complete original upgrades an incomplete entry and receives the fu
     assert.ok(cache.get("100@s.whatsapp.net", "original"));
 });
 
-test("colliding message IDs stay isolated by chat, with only transport-supplied aliases accepted", t => {
+test("the map uses IDs alone across JID/LID changes and rejects genuinely conflicting IDs", t => {
     const { cache } = fixture(t);
     const a = original("same", "100@s.whatsapp.net");
     a.key.remoteJidAlt = "100@lid";
     cache.capture(a);
-    cache.capture(original("same", "200@s.whatsapp.net", "video"));
+    assert.ok(cache.byId.get("same").message);
+    assert.ok(cache.get("same"));
     assert.ok(cache.get("100@s.whatsapp.net", "same").message.viewOnceMessageV2Extension.message.imageMessage);
     assert.ok(cache.get("100@lid", "same").message.viewOnceMessageV2Extension.message.imageMessage);
-    assert.ok(cache.get("200@s.whatsapp.net", "same").message.viewOnceMessageV2Extension.message.videoMessage);
-    assert.equal(cache.get("unrelated@g.us", "same"), null);
+    assert.ok(cache.get("unrelated@g.us", "same").message.viewOnceMessageV2Extension.message.imageMessage);
+    cache.capture(original("same", "200@s.whatsapp.net", "video"));
+    assert.equal(cache.get("same"), null, "ambiguous IDs cannot choose an arbitrary photo");
 });
 
 test("reconnect removes old listeners without clearing the shared 15-minute cache", async t => {

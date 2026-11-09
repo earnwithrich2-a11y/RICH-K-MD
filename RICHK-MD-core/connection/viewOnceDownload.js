@@ -27,7 +27,7 @@ function mediaQuality(media) {
     return Number(Boolean(media?.mediaKey)) * 2 + Number(Boolean(media?.url || media?.directPath));
 }
 
-// Read-only access to existing, chat-scoped stores. Never search by ID alone.
+// Owner-only manual recovery uses ID-only caches; durable store fallback stays scoped.
 function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettings, prefetchOptions = {} }) {
     const recent = cache || new ViewOnceCache();
     const prefetch = buffers && getSettings ?
@@ -36,7 +36,7 @@ function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettin
         for (const message of messages) {
             try {
                 recent.capture(message);
-                const original = recent.get(message.key?.remoteJid, message.key?.id);
+                const original = recent.get(message.key?.id);
                 const raw = message.messageTimestamp;
                 const seconds = typeof raw?.toNumber === "function" ? raw.toNumber() : Number(raw?.low ?? raw);
                 const freshAppend = type === "append" && seconds * 1000 >= Date.now() - 60000 &&
@@ -60,13 +60,17 @@ function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettin
     socket.ev?.on("messages.upsert", capture);
     socket.ev?.on("connection.update", connection);
     socket.viewOnceStore = {
+        getById(id) {
+            if (recent.ambiguous.has(id)) return null;
+            return recent.get(id) || buffers?.getMessage(id) || null;
+        },
         async getMessage(chat, id) {
+            const captured = recent.get(id);
+            if (completeMedia(captured)) return captured;
             let saved;
             try { saved = await store.loadMessage(chat, id); } catch { /* Try the independent caches. */ }
             if (completeMedia(saved)) return saved;
-            const captured = recent.get(chat, id);
-            if (completeMedia(captured)) return captured;
-            const prefetched = buffers?.getMessage(chat, id);
+            const prefetched = recent.ambiguous.has(id) ? null : buffers?.getMessage(id);
             if (prefetched) return prefetched;
             // Preserve the prior durable fallback for older messages.
             if (captured) return archive.find(chat, id)?.original || captured;
@@ -74,10 +78,11 @@ function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettin
         },
         async getMedia(chat, id) {
             let privateCopy;
-            try { privateCopy = await prefetch?.wait(chat, id); }
+            try { if (!recent.ambiguous.has(id)) privateCopy = await prefetch?.wait(chat, id); }
             catch { /* Optional prefetch must not disable existing archived copies. */ }
             if (privateCopy) return privateCopy;
-            const row = archive.find(chat, id);
+            const sourceChat = recent.get(id)?.key?.remoteJid || chat;
+            const row = archive.find(sourceChat, id);
             if (!/^[a-f0-9]{64}$/.test(row?.media || "")) return null;
             const file = path.join(archive.dir, row.media);
             const stat = await fs.stat(file);
@@ -94,11 +99,21 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     const info = unwrap(message?.message)?.extendedTextMessage?.contextInfo || {};
     const quoted = context.quotedMsg || context.quoted?.message || context.quoted ||
         message?.quoted?.message || info.quotedMessage;
-    const id = info.stanzaId || context.quotedKey?.id || context.quoted?.id || message?.quoted?.id;
+    const id = context.quotedMessageContext?.stanzaId || context.contextInfo?.stanzaId ||
+        info.stanzaId || context.quotedKey?.id || context.quoted?.id || message?.quoted?.id;
     // Only authenticated envelope addresses may select a store's conversation.
     const chats = verifiedChats(socket, message);
     const quotedMedia = extractViewOnceMedia(quoted);
     const originals = [];
+    if (id) {
+        try {
+            const cached = await socket.viewOnceStore?.getById?.(id);
+            if (cached?.message) {
+                const found = extractViewOnceMedia(cached.message);
+                if (found) originals.push({ ...found, original: cached, chat: cached.key?.remoteJid || chats[0] });
+            }
+        } catch { /* A broken cache must not discard a usable quote. */ }
+    }
     if (id) for (const chat of chats) {
         try {
             const saved = await socket.viewOnceStore?.getMessage(chat, id);
@@ -133,7 +148,7 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     }
     async function cachedContent() {
         if (!id) return null;
-        for (const chat of chats) {
+        for (const chat of new Set([...originals.map(item => item.chat), ...chats])) {
             const source = candidates.find(item => item.chat === chat) || preferred;
             try {
                 const buffer = await socket.viewOnceStore?.getMedia(chat, id);

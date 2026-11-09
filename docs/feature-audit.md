@@ -40,15 +40,20 @@ loaded by the application and were left alone.
 - Automatic view-once saving also sends only to the connected account's DM.
   It cannot recover media WhatsApp no longer supplies.
 - Manual `.vv` and `.👍` support view-once photos, videos and audio and send full
-  buffers to the requester's private inbox. They first consult chat-scoped
-  original/media caches, then attempt download and one native media refresh.
+  buffers only to the connected bot owner's private inbox. Failures are silent:
+  no error, success confirmation or bot reaction is sent to the source chat.
+  Owner-authored 👍 reactions also trigger recovery, with SDK replay deduplication
+  and no automatic-reaction loops. Existing owner/sudo command access is retained;
+  ordinary contacts cannot trigger an owner-only save.
+  Recovery first consults message-ID-only original/media caches, then scoped
+  durable stores, download and one native media refresh.
   Opened media is recoverable only if a saved copy or downloadable original still
   exists; no command can recreate content the bot never received and WhatsApp no
   longer supplies.
-  Original lookup checks `store.loadMessage(chat, quotedId)` first. A separate
+  Original lookup checks the in-memory Map by `stanzaId` alone first. A separate
   metadata-only memory Map captures incoming view-once envelopes synchronously,
   before normalization, retaining full keys for 15 minutes. It is indexed by
-  message ID with per-chat isolation, survives socket reconnects within the same
+  message ID alone without requiring a JID/LID match, survives socket reconnects within the same
   process, and expires automatically. Process restarts still rely on the durable
   message/recovery stores.
 - `.vvcache on/off` separately controls private byte prefetch for future View-Once

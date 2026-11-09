@@ -653,6 +653,7 @@ function GiftedChatBot(Gifted, chatBot, chatBotMode, createContext, createContex
                 if (!text || typeof text !== 'string') return;
 
                 const settings = await getAllSettings();
+                if (require("./connection/commandRuntime").isSilentViewOnceText(text, settings.PREFIX || ".")) return;
                 const botName = settings.BOT_NAME || 'RICHK-MD';
                 const aiResponse = await getAIResponse(text);
 

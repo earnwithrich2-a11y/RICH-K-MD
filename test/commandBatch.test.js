@@ -331,6 +331,17 @@ test("a stale owner setting never grants access after connecting another WhatsAp
     assert.deepEqual(f.calls, ["connected-owner"]);
 });
 
+test("silent View-Once aliases never send prefix reactions or dispatcher errors", async () => {
+    for (const text of [".vv", ".👍", ".reveal", "!vv", ".vv2"]) {
+        const f = dispatcherHarness(false, new EventEmitter(), {
+            realSerializer: true, beforeReply: () => { throw Error("recovery failed"); },
+        });
+        await f.receive({ messages: [message(`silent-${text}`, text)], type: "notify" });
+        assert.deepEqual(f.reactions, [], text);
+        assert.deepEqual(f.replies, [], text);
+    }
+});
+
 test("old owner command history is not replayed", async () => {
     const f = dispatcherHarness(false, new EventEmitter(), {
         realSerializer: true, mode: "private", ownerNumber: "15550000002",

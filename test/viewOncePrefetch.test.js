@@ -115,14 +115,16 @@ test("download concurrency is bounded to two and duplicate packets share a singl
     assert.equal(maximum, 2);
 });
 
-test("the private cache isolates colliding IDs and honors only the original transport alias", async t => {
+test("private media buffers and pending lookups use the ID alone despite an unrelated JID spelling", async t => {
     const f = fixture(t, { settings: { VIEW_ONCE_CACHE: "true" } });
     const a = original("same", "100@s.whatsapp.net");
     a.key.remoteJidAlt = "100@lid";
     await f.controller.offer(a);
     assert.deepEqual(await f.controller.wait("100@lid", "same"), Buffer.from("full media"));
-    assert.equal(await f.controller.wait("unrelated@g.us", "same"), null);
-    assert.equal(f.buffers.getMessage("200@s.whatsapp.net", "same"), null);
+    assert.deepEqual(await f.controller.wait("unrelated@g.us", "same"), Buffer.from("full media"));
+    assert.ok(f.buffers.entries.has("same"));
+    assert.ok(f.buffers.getMessage("same"));
+    assert.ok(f.buffers.getMessage("200@s.whatsapp.net", "same"));
 });
 
 test("native refresh can rescue an expired early download without mutating the captured original", async t => {

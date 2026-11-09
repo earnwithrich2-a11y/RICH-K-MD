@@ -15,7 +15,8 @@ const { getGroupSetting } = require("./RICHK-MD-core/database/groupSettings");
 const { getCommandSettings } = require("./RICHK-MD-core/database/settings");
 const { connectedOwnerJid } = require("./RICHK-MD-core/connection/ownerIdentity");
 const { getCachedSudoNumbers } = require("./RICHK-MD-core/database/sudo");
-const { needsGroupMetadata, runWithPresence, serviceUnavailable } = require("./RICHK-MD-core/connection/commandRuntime");
+const { needsGroupMetadata, runWithPresence, serviceUnavailable, isSilentViewOnceText } = require("./RICHK-MD-core/connection/commandRuntime");
+const { installViewOnceReactions } = require("./RICHK-MD-core/connection/viewOnceDelivery");
 
 const {
     default: giftedConnect,
@@ -312,6 +313,7 @@ async function startGifted() {
             store, archive: recoveryArchive, cache: viewOnceCache, buffers: viewOnceBuffers,
             getSettings: getAllSettings,
         });
+        installViewOnceReactions(Gifted);
         installMessageRecovery(Gifted, {
             archive: recoveryArchive,
             store,
@@ -530,8 +532,10 @@ function setupCommandHandler(Gifted) {
         const botId = standardizeJid(Gifted.user?.id || Gifted.authState?.creds?.me?.id);
         const dispatchStartedAt = performance.now();
         const earlyBody = extractMessageText(ms);
+        const silentViewOnceRequest = isSilentViewOnceText(earlyBody, settings.PREFIX || ".");
         let reactionStarted = false;
         const startCommandReaction = () => {
+            if (silentViewOnceRequest) return;
             if (reactionStarted) return;
             reactionStarted = true;
             // Fire before sender mapping, permissions metadata or the task.
@@ -593,7 +597,7 @@ function setupCommandHandler(Gifted) {
 
         const gmd = isCommand && command ? findCommand(command) : null;
         const isMaintenanceCommand = gmd?.maintenance === true;
-        const bodyCmd = findBodyCommand(body);
+        const bodyCmd = silentViewOnceRequest ? null : findBodyCommand(body);
         if (isCommand) {
             Gifted.commandDiagnostics?.mark("commandsRecognized");
             console.info(
@@ -750,6 +754,7 @@ function setupCommandHandler(Gifted) {
                 console.info("[WhatsApp] Command handler completed.");
             } catch (error) {
                 console.error("[WhatsApp] Command failed; returning a safe service notice.");
+                if (silentViewOnceRequest || gmd?.silent) return;
                 try {
                     await runCommandOutput(command, settings, async () => Gifted.sendMessage(
                         from,

@@ -121,6 +121,8 @@ function installOptionalAutomation(socket, {
     async function process(msg, settings) {
         const jid = msg?.key?.remoteJid;
         if (!msg?.message || !msg.key?.id || msg.key.fromMe || isMessageEdit(msg.message)) return;
+        const { isSilentViewOnceText } = require("./commandRuntime");
+        if (isSilentViewOnceText(messageText(msg.message), settings.PREFIX || ".")) return;
         if (!isChat(jid) && jid !== "status@broadcast") return;
         if (!allow(`message:${jid}:${msg.key.id}`, 5 * 60 * 1000)) return;
         if (jid === "status@broadcast") return status(msg, settings);

@@ -1,6 +1,14 @@
 const heavyCategories = new Set(["ai", "downloader", "download", "converter", "search", "tools"]);
 const quickCommands = new Set(["ping", "menu", "settings", "alive", "uptime"]);
 const presenceJobs = new WeakMap();
+const silentViewOnceCommands = new Set(["vv", "👍", "‎", "reveal", "vv2", "‎2", "reveal2"]);
+
+function isSilentViewOnceText(text, prefix = ".") {
+    if (typeof text !== "string") return false;
+    text = text.trimStart();
+    return [...new Set([prefix, ".", "!"])].some(p =>
+        p && text.startsWith(p) && silentViewOnceCommands.has(text.slice(p.length).trim().split(/\s+/)[0].toLowerCase()));
+}
 
 function needsGroupMetadata(command) {
     return !command || (!quickCommands.has(command.pattern) &&
@@ -14,6 +22,7 @@ function safePresence(socket, state, chat) {
 }
 
 async function runWithPresence(socket, chat, command, work) {
+    if (command?.silent) return work();
     if (!command?.heavy && !heavyCategories.has(String(command?.category).toLowerCase())) return work();
     let chats = presenceJobs.get(socket);
     if (!chats) presenceJobs.set(socket, chats = new Map());
@@ -48,4 +57,4 @@ function premiumContent(content) {
     return content;
 }
 
-module.exports = { needsGroupMetadata, runWithPresence, serviceUnavailable, premiumText, premiumContent };
+module.exports = { needsGroupMetadata, runWithPresence, serviceUnavailable, premiumText, premiumContent, isSilentViewOnceText };
