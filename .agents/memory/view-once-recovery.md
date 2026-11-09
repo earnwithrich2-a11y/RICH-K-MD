@@ -25,6 +25,19 @@ with the saved original's media type, prefer existing bytes, and attempt native
 media refresh only when keys are available. Never search by message ID across
 unrelated chats or promise reconstruction of media the bot never received.
 
+An unavailable/expired reply is not evidence that the sender opened the media.
+
+**Why:** The user reported the same failure in self-chat, peer chats and groups.
+Regression cases reproduced failures even with a usable original or quote:
+incomplete/stale sources could hide complete copies, and self-chat address
+changes could miss a saved original.
+
+**How to apply:** Reproduce source-selection failures before changing retention
+or blaming expiry. Preserve complete alternative sources without mixing keys and
+paths from different versions. Use both authenticated self identities only for a
+genuine self-chat, not merely because a peer-chat command is outgoing. Diagnose
+missing keys separately from download errors without logging private metadata.
+
 Some SDK message-level download helpers reject media that has only directPath,
 despite the content-stream downloader supporting that path.
 

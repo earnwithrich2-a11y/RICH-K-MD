@@ -15,6 +15,14 @@
   Expired/unavailable media replies `❌ This view-once media has expired or was
   already opened.` Failed downloads, inbox sends, confirmations and reactions
   are contained. No source-chat media fallback is allowed.
+- Manual recovery ranks complete originals and quotes rather than letting a
+  stripped stored record overwrite good quote metadata. A stale saved download
+  can fall back to a complete quote without mixing one version's key with another
+  version's path. Incomplete primary records do not hide verified alternate
+  copies. Self-chat may use the connected account's authenticated phone/LID aliases;
+  outgoing peer/group commands never gain access to its self-chat cache.
+  Failed recovery logs only availability flags and HTTP status codes, never media
+  keys, URLs or chat identities. The expiry reply alone is not proof of expiry.
 - Only disconnect 401 stops automatic reconnection and marks pairing as required.
   Other codes, including 500, 408, 428, 440 and 515, retry after 15 seconds.
   Duplicate closes cannot launch multiple new sockets. Maintenance shutdown
