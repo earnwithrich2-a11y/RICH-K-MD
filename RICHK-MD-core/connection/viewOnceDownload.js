@@ -6,8 +6,26 @@ const { extractViewOnceMedia, hasViewOnceMarker } = require("./viewOnceMedia");
 const { mediaContent, bufferContent } = require("./automationMedia");
 const { ViewOnceCache, completeMedia } = require("./viewOnceCache");
 const { createViewOncePrefetch } = require("./viewOncePrefetch");
+const { normalizeIdentity } = require("./ownerIdentity");
 
 const UNAVAILABLE = "This view-once media is no longer available. It may have been opened or expired, and the bot has no downloadable original or saved copy.";
+
+function verifiedChats(socket, message) {
+    const chats = new Set([message?.key?.remoteJid || message?.chat, message?.key?.remoteJidAlt].filter(Boolean));
+    const own = [socket.user?.id, socket.user?.lid,
+        socket.authState?.creds?.me?.id, socket.authState?.creds?.me?.lid]
+        .map(normalizeIdentity).filter(Boolean);
+    // Only a genuine self-chat may expand to the account's other login address.
+    // fromMe alone is not enough: outgoing peer/group commands must stay scoped.
+    if (own.includes(normalizeIdentity(message?.key?.remoteJid || message?.chat))) {
+        for (const jid of own) chats.add(jid);
+    }
+    return [...chats];
+}
+
+function mediaQuality(media) {
+    return Number(Boolean(media?.mediaKey)) * 2 + Number(Boolean(media?.url || media?.directPath));
+}
 
 // Read-only access to existing, chat-scoped stores. Never search by ID alone.
 function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettings, prefetchOptions = {} }) {
@@ -73,54 +91,76 @@ function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettin
 
 async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     const message = context.mek || context.m || context;
-    const info = message?.message?.extendedTextMessage?.contextInfo || {};
+    const info = unwrap(message?.message)?.extendedTextMessage?.contextInfo || {};
     const quoted = context.quotedMsg || context.quoted?.message || context.quoted ||
         message?.quoted?.message || info.quotedMessage;
     const id = info.stanzaId || context.quotedKey?.id || context.quoted?.id || message?.quoted?.id;
     // Only authenticated envelope addresses may select a store's conversation.
-    const chats = [...new Set([message?.key?.remoteJid || message?.chat, message?.key?.remoteJidAlt].filter(Boolean))];
-    let original, originalChat;
+    const chats = verifiedChats(socket, message);
+    const quotedMedia = extractViewOnceMedia(quoted);
+    const originals = [];
     if (id) for (const chat of chats) {
         try {
             const saved = await socket.viewOnceStore?.getMessage(chat, id);
-            if (saved?.message) { original = saved; originalChat = chat; break; }
+            if (!saved?.message) continue;
+            let found = extractViewOnceMedia(saved.message);
+            if (!found && hasViewOnceMarker(quoted)) {
+                const stored = unwrap(saved.message);
+                const mediaType = ["imageMessage", "videoMessage", "audioMessage"].find(type => stored?.[type]);
+                if (mediaType) found = { mediaType, media: stored[mediaType] };
+            }
+            if (!found) continue;
+            originals.push({ ...found, original: saved, chat });
+            // Do not stop at an empty/stripped record and hide a usable alias.
+            if (mediaQuality(found.media) === 3) break;
         } catch { /* A cache failure must not prevent a fresh media download. */ }
     }
-    const stored = unwrap(original?.message);
-    let viewOnce = extractViewOnceMedia(original?.message);
-    // The recovery archive unwraps envelopes. An opened/empty quote still
-    // supplies the view-once marker, while its original supplies the media type.
-    if (!viewOnce && hasViewOnceMarker(quoted) && stored) {
-        const mediaType = ["imageMessage", "videoMessage", "audioMessage"].find(type => stored[type]);
-        if (mediaType) viewOnce = { mediaType, media: stored[mediaType] };
+    originals.sort((a, b) => mediaQuality(b.media) - mediaQuality(a.media));
+    const mediaType = originals[0]?.mediaType || quotedMedia?.mediaType;
+    if (!mediaType) throw new Error("Please reply to a view-once image, video or audio message.");
+    const candidates = originals.filter(item => item.mediaType === mediaType);
+    if (quotedMedia?.mediaType === mediaType) candidates.push({
+        ...quotedMedia, chat: chats[0], original: null,
+    });
+    // Keep complete sources intact. Never mix one version's key with another
+    // version's URL, and never replace a good quote with stripped store fields.
+    candidates.sort((a, b) => mediaQuality(b.media) - mediaQuality(a.media));
+    const preferred = candidates[0];
+    const statuses = new Set();
+    function failed(error) {
+        const code = Number(error?.response?.status || error?.output?.statusCode || error?.statusCode);
+        if (Number.isInteger(code) && code >= 100 && code <= 599) statuses.add(code);
     }
-    viewOnce ||= extractViewOnceMedia(quoted);
-    if (!viewOnce) throw new Error("Please reply to a view-once image, video or audio message.");
-    // Quotes can lose URL, directPath or mediaKey after opening. Prefer the full
-    // captured original, but never replace it with a similarly named media type.
-    if (stored?.[viewOnce.mediaType]) {
-        viewOnce = { mediaType: viewOnce.mediaType, media: stored[viewOnce.mediaType] };
-    }
-    const { mediaType, media } = viewOnce;
     async function cachedContent() {
         if (!id) return null;
-        for (const chat of originalChat ? [originalChat] : chats) {
+        for (const chat of chats) {
+            const source = candidates.find(item => item.chat === chat) || preferred;
             try {
                 const buffer = await socket.viewOnceStore?.getMedia(chat, id);
-                if (buffer?.length) return bufferContent(mediaType, media, buffer);
+                if (buffer?.length) return bufferContent(mediaType, source.media, buffer);
             } catch { /* Expired/missing cache files do not disable network recovery. */ }
         }
         return null;
     }
     const cached = await cachedContent();
     if (cached) return cached;
-    if (media.url || media.directPath) {
+    const attempted = new Set();
+    for (const candidate of candidates) {
+        const { media } = candidate;
+        if (!media.url && !media.directPath) continue;
+        // The source list is tiny, but identical quotes must not repeat a slow download.
+        const fingerprint = safeStringify([media.mediaKey, media.url, media.directPath]);
+        if (attempted.has(fingerprint)) continue;
+        attempted.add(fingerprint);
         try { return await save(mediaType, media); }
-        catch { /* Try the native, authenticated media-refresh request once. */ }
+        catch (error) { failed(error); }
     }
-    if (id && chats[0] && media.mediaKey && typeof socket.updateMediaMessage === "function") {
+    const refreshSource = candidates.find(item => item.original?.key && item.media.mediaKey) ||
+        candidates.find(item => item.media.mediaKey);
+    if (id && chats[0] && refreshSource && typeof socket.updateMediaMessage === "function") {
+        const { media, original, chat } = refreshSource;
         try {
-            const key = original?.key || { ...context.quotedKey, remoteJid: chats[0], id,
+            const key = original?.key || { ...context.quotedKey, remoteJid: chat || chats[0], id,
                 participant: info.participant || context.quotedKey?.participant };
             // Native refresh mutates its envelope; never change archived originals.
             const envelope = safeParse(safeStringify({
@@ -129,12 +169,18 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
             const refreshed = await socket.updateMediaMessage(envelope);
             const fresh = unwrap(refreshed?.message || envelope.message)?.[mediaType];
             if (fresh?.url || fresh?.directPath) return await save(mediaType, { ...media, ...fresh });
-        } catch { /* Opening/expiration can make reupload unavailable. */ }
+        } catch (error) { failed(error); }
     }
     // An early background download may have completed during the refresh attempt.
     const completed = await cachedContent();
     if (completed) return completed;
-    throw new Error(UNAVAILABLE);
+    const error = new Error(UNAVAILABLE);
+    error.code = candidates.some(item => item.media.mediaKey)
+        ? "VIEW_ONCE_DOWNLOAD_FAILED" : "VIEW_ONCE_KEYS_MISSING";
+    console.warn(`[ViewOnce] Recovery unavailable: reason=${error.code}; originalFound=${originals.length > 0}; ` +
+        `mediaPath=${candidates.some(item => item.media.url || item.media.directPath)}; ` +
+        `downloadAttempted=${attempted.size > 0}; httpStatus=${[...statuses].join(",") || "unknown"}.`);
+    throw error;
 }
 
 module.exports = { attachViewOnceStore, recoverViewOnce, UNAVAILABLE };

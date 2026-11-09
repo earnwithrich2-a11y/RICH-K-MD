@@ -22,6 +22,123 @@ function original(type, media) {
         message: { viewOnceMessageV2: { message: { [`${type}Message`]: media } } } };
 }
 
+test("an incomplete stored original must not override a complete quoted photo", async () => {
+    const socket = { viewOnceStore: { getMessage: async () => original("image", {}) } };
+    const result = await recoverViewOnce(socket, context({
+        imageMessage: { viewOnce: true, mediaKey: Buffer.from("quote-key"), directPath: "/quoted-photo" },
+    }), { save: async (_type, media) => {
+        assert.equal(media.directPath, "/quoted-photo");
+        assert.deepEqual(media.mediaKey, Buffer.from("quote-key"));
+        return { image: Buffer.from("actual photo") };
+    } });
+    assert.deepEqual(result.image, Buffer.from("actual photo"));
+});
+
+test("an incomplete primary record must not hide a full original under a verified alternate chat", async () => {
+    const calls = [];
+    const socket = { viewOnceStore: { getMessage: async (chat, id) => {
+        calls.push([chat, id]);
+        return original("image", chat === "verified@g.us"
+            ? { mediaKey: Buffer.from("key"), directPath: "/verified-photo" } : {});
+    } } };
+    const result = await recoverViewOnce(socket, context({ imageMessage: { viewOnce: true } }), {
+        save: async (_type, media) => {
+            assert.equal(media.directPath, "/verified-photo");
+            return { image: Buffer.from("actual photo") };
+        },
+    });
+    assert.deepEqual(result.image, Buffer.from("actual photo"));
+    assert.deepEqual(calls, [["chat@g.us", "original"], ["verified@g.us", "original"]]);
+});
+
+test("self-chat lookup finds a phone original when the command uses the account's verified LID without an alternate key", async () => {
+    const phone = "100@s.whatsapp.net", lid = "900@lid";
+    const calls = [];
+    const saved = original("image", { mediaKey: Buffer.from("key"), directPath: "/own-photo" });
+    saved.key = { remoteJid: phone, id: "original", fromMe: true };
+    const socket = {
+        user: { id: "100:7@s.whatsapp.net", lid: "900:2@lid" },
+        viewOnceStore: { getMessage: async (chat, id) => {
+            calls.push([chat, id]);
+            return chat === phone ? saved : null;
+        } },
+    };
+    const request = context({ imageMessage: { viewOnce: true } });
+    request.mek.key = { remoteJid: lid, id: "command", fromMe: true };
+    const result = await recoverViewOnce(socket, request, {
+        save: async (_type, media) => {
+            assert.equal(media.directPath, "/own-photo");
+            return { image: Buffer.from("own photo") };
+        },
+    });
+    assert.deepEqual(result.image, Buffer.from("own photo"));
+    assert.deepEqual(calls, [[lid, "original"], [phone, "original"]]);
+});
+
+test("a stale stored URL does not prevent trying a complete fresh quote of the same media", async () => {
+    const calls = [];
+    const socket = { viewOnceStore: { getMessage: async () => original("image", {
+        mediaKey: Buffer.from("key"), directPath: "/old-photo",
+    }) } };
+    const result = await recoverViewOnce(socket, context({ imageMessage: {
+        viewOnce: true, mediaKey: Buffer.from("key"), directPath: "/fresh-photo",
+    } }), { save: async (_type, media) => {
+        calls.push(media.directPath);
+        if (media.directPath === "/old-photo") throw Object.assign(new Error("unavailable"), { statusCode: 404 });
+        return { image: Buffer.from("fresh photo") };
+    } });
+    assert.deepEqual(result.image, Buffer.from("fresh photo"));
+    assert.deepEqual(calls, ["/old-photo", "/fresh-photo"]);
+});
+
+test("outgoing commands in a peer chat never gain access to the connected account's self-chat cache", async () => {
+    const calls = [];
+    const socket = {
+        user: { id: "100:7@s.whatsapp.net", lid: "900@lid" },
+        viewOnceStore: { getMessage: async chat => {
+            calls.push(chat);
+            return chat === "100@s.whatsapp.net" ? original("image", {
+                mediaKey: Buffer.from("secret"), directPath: "/private-self-photo",
+            }) : null;
+        } },
+    };
+    const request = context({ imageMessage: { viewOnce: true } });
+    request.mek.key = { remoteJid: "200@s.whatsapp.net", fromMe: true };
+    request.quotedKey = { id: "original", remoteJid: "100@s.whatsapp.net" };
+    await assert.rejects(recoverViewOnce(socket, request), { message: UNAVAILABLE });
+    assert.deepEqual(calls, ["200@s.whatsapp.net"]);
+});
+
+test("refresh uses the real saved message key without combining a quote's path with the original's media key", async () => {
+    const saved = original("image", { mediaKey: Buffer.from("original-key") });
+    saved.key.fromMe = true;
+    let refreshed = 0;
+    const socket = {
+        viewOnceStore: { getMessage: async () => saved },
+        updateMediaMessage: async envelope => {
+            refreshed++;
+            assert.deepEqual(envelope.key, saved.key);
+            assert.deepEqual(envelope.message.imageMessage.mediaKey, Buffer.from("original-key"));
+            assert.equal(envelope.message.imageMessage.directPath, undefined);
+            envelope.message.imageMessage.directPath = "/authenticated-refresh";
+            return envelope;
+        },
+    };
+    const result = await recoverViewOnce(socket, context({ imageMessage: {
+        viewOnce: true, directPath: "/quote-path", mediaKey: Buffer.from("different-key"),
+    } }), { save: async (_type, media) => {
+        if (media.directPath === "/quote-path") {
+            assert.deepEqual(media.mediaKey, Buffer.from("different-key"));
+            throw new Error("stale quote");
+        }
+        assert.equal(media.directPath, "/authenticated-refresh");
+        assert.deepEqual(media.mediaKey, Buffer.from("original-key"));
+        return { image: Buffer.from("refreshed photo") };
+    } });
+    assert.equal(refreshed, 1);
+    assert.deepEqual(result.image, Buffer.from("refreshed photo"));
+});
+
 for (const type of ["image", "video", "audio"]) {
     test(`opened ${type} recovers from saved bytes without any network URL or refresh request`, async () => {
         let calls = 0;
