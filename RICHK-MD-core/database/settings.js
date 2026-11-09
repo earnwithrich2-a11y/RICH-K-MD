@@ -33,7 +33,7 @@ const SettingsDB = DATABASE.define(
 const DEFAULT_SETTINGS = {
     PREFIX: ".",
     OWNER_NAME: "RICHK-MD",
-    OWNER_NUMBER: "233591574311",
+    OWNER_NUMBER: "",
     BOT_NAME: "RICHK-MD",
     FOOTER,
     CAPTION: "© 2026 RICHK-MD",

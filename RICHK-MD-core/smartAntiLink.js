@@ -9,8 +9,6 @@ const LINK_WARNING = "⚠️ Links are strictly not allowed in this group! Your 
 const recentDeletes = new WeakMap();
 
 function isBotOwner(socket, message, metadata, settings, extra = []) {
-    const owner = String(settings.OWNER_NUMBER || "").split("@")[0].replace(/\D/g, "");
-    if (!owner) return false;
     const normalize = jid => {
         if (typeof jid !== "string" || !jid) return "";
         return jidNormalizedUser(/^\d+$/.test(jid) ? `${jid}@s.whatsapp.net` : jid);
@@ -28,7 +26,7 @@ function isBotOwner(socket, message, metadata, settings, extra = []) {
             if (pn) actors.add(normalize(pn));
         }
     }
-    return actors.has(`${owner}@s.whatsapp.net`);
+    return botIdentities(socket).map(normalize).filter(Boolean).some(jid => actors.has(jid));
 }
 
 async function enforceSmartAntiLink(socket, message, getMetadata, getSettings) {

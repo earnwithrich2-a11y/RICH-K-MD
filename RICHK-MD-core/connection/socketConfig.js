@@ -1,16 +1,17 @@
 const NodeCache = require('node-cache');
-const { makeCacheableSignalKeyStore } = require('gifted-baileys');
+const { makeCacheableSignalKeyStore, Browsers } = require('gifted-baileys');
+const { findMessageForRetryWithWait } = require('./messageRetry');
 const { cachedGroupMetadata } = require('./groupCache');
 const { createTransportLogger } = require('./transportLogger');
 const { makeAtomicSignalRepository } = require('./atomicSignalRepository');
 
 const _userDevicesCache = new NodeCache({ stdTTL: 1800, useClones: false });
 
-const createSocketConfig = (version, state, logger) => {
+const createSocketConfig = (version, state, logger, store) => {
     return {
         version,
         logger: createTransportLogger(),
-        browser: ['Ubuntu', 'Chrome', '22.04.4'],
+        browser: Browsers.macOS('Desktop'),
         auth: {
             creds: state.creds,
             keys: makeCacheableSignalKeyStore(state.keys, logger)
@@ -32,7 +33,15 @@ const createSocketConfig = (version, state, logger) => {
         retryRequestDelayMs: 250,
         maxMsgRetryCount: 5,
         generateHighQualityLinkPreview: false,
-        getMessage: async () => undefined,
+        getMessage: async key => {
+            try {
+                return (await findMessageForRetryWithWait(store, key,
+                    [state.creds.me?.id, state.creds.me?.lid])).message;
+            } catch {
+                console.warn("[WhatsApp] Resend lookup unavailable; saved messages retained.");
+                return undefined;
+            }
+        },
         emitOwnEvents: true,
         patchMessageBeforeSending: (message, jids) => {
             const requiresPatch = !!(

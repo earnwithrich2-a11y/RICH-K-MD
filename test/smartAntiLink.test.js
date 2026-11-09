@@ -76,8 +76,8 @@ test("does not punish harmless replies just because the quoted original had a li
     }
 });
 
-test("admins and configured bot owner are silently exempt, including LID/device aliases", async () => {
-    for (const sender of [admin, "20003@lid", owner, "20004:2@lid"]) {
+test("admins and connected bot owner are silently exempt, including LID/device aliases", async () => {
+    for (const sender of [admin, "20003@lid", bot, "20001:2@lid"]) {
         const s = socket();
         await enforce(s, message(undefined, sender));
         assert.deepEqual(s.sent, [], sender);
@@ -86,6 +86,9 @@ test("admins and configured bot owner are silently exempt, including LID/device 
     s.isSuperUser = true;
     await enforce(s, message());
     assert.equal(s.sent.length, 2, "sudo/developer flags do not exempt an ordinary member");
+    const oldOwner = socket();
+    await enforce(oldOwner, message(undefined, owner));
+    assert.equal(oldOwner.sent.length, 2, "a previous deployment's owner setting cannot grant an exemption");
 });
 
 test("missing bot admin rights, failed permission lookup and delete rejection are quiet", async () => {
@@ -134,10 +137,12 @@ test("command checks real group roles/owner, saves per group, rejects global sud
         reply: async text => replies.push(text), ...extra,
     }, deps);
     await run(admin, "on");
-    await run(owner, "off");
+    await run(bot, "off");
     assert.deepEqual(saved, [[group, "ANTILINK", "delete"], [group, "ANTILINK", "false"]]);
     await run(member, "on", { isSuperUser: true, isAdmin: true });
     assert.equal(saved.length, 2);
+    await run(owner, "off");
+    assert.equal(saved.length, 2, "stored owner from another account is not authorized");
     assert.match(replies.at(-1), /Only group admins and the bot owner/);
     await run(admin, "on", { isGroup: false });
     await run(admin, "__proto__");

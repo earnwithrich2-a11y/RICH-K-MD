@@ -662,33 +662,31 @@ gmd(
   async (from, Gifted, conText) => {
     const { mek, reply, react, isSuperUser, sender, isGroup } = conText;
 
-    if (!isSuperUser) return reply(`Owner Only Command!`);
-
-    const destination = await resolvePrivateRecipient({
-      message: mek,
-      from,
-      sender,
-      isGroup,
-      socket: Gifted,
-    });
-    if (!destination) return reply("Could not identify your private chat. No media was sent.");
-
+    let delivered = false;
     try {
+      if (!isSuperUser) return await reply(`Owner Only Command!`);
+      const destination = await resolvePrivateRecipient({
+        message: mek,
+        from,
+        sender,
+        isGroup,
+        socket: Gifted,
+      });
+      if (!destination) return await reply("Could not identify your private chat. No media was sent.");
       const msg = await recoverViewOnce(Gifted, conText);
       await Gifted.sendMessage(destination, msg);
+      delivered = true;
+      await reply("✅ View-once sent to your DM.");
       await react("✅");
     } catch (e) {
       console.warn("[ViewOnce] Private media recovery or delivery failed.");
-      let notice = e.message?.startsWith("Please reply") || e.message?.startsWith("This view-once")
-        ? e.message : "Could not deliver the recovered media privately. Please try again.";
-      if (e.message?.startsWith("This view-once")) {
-        try {
-          notice += await getSetting("VIEW_ONCE_CACHE") === "true" ?
-            "\nAsk the sender to resend a fresh copy; the bot must finish caching it before it is opened." :
-            "\nFor future messages, enable .vvcache on before they are sent or opened. Ask the sender to resend this one.";
-        } catch { notice += "\nAsk the sender to resend a fresh copy while the bot is connected."; }
-      }
-      await reply(notice);
+      if (delivered) return; // A failed acknowledgment must not report a failed media delivery.
+      const notice = e?.message?.startsWith("Please reply") ? e.message
+        : e?.message?.startsWith("This view-once") || /No valid media URL|directPath/.test(e?.message || "")
+          ? "❌ This view-once media has expired or was already opened."
+          : "Could not deliver the recovered media privately. Please try again.";
+      try { await reply(notice); }
+      catch { console.warn("[ViewOnce] Failure acknowledgment unavailable; socket kept running."); }
     }
   },
 );
@@ -1364,16 +1362,6 @@ async function getStatusJidList(Gifted) {
 }
 
 
-const DEV_NUMBERS = [
-  "254715206562",
-  "254747746851",
-  "254114018035",
-  "254728782591",
-  "254799916673",
-  "254762016957",
-  "254113174209",
-];
-
 gmd(
   {
     pattern: "setsudo",
@@ -1411,18 +1399,6 @@ gmd(
       await react("❌");
       return reply(
         "❌ Please reply to a user or provide a number!\nExample: .setsudo 254712345678",
-      );
-    }
-
-    if (DEV_NUMBERS.includes(targetNumber)) {
-      await react("❌");
-      return Gifted.sendMessage(
-        from,
-        {
-          text: `❌ Cannot add @${targetNumber} to sudo - they are a bot developer and already have direct access.`,
-          mentions: [`${targetNumber}@s.whatsapp.net`],
-        },
-        { quoted: mek },
       );
     }
 
@@ -1501,18 +1477,6 @@ gmd(
       await react("❌");
       return reply(
         "❌ Please reply to a user or provide a number!\nExample: .delsudo 254712345678",
-      );
-    }
-
-    if (DEV_NUMBERS.includes(targetNumber)) {
-      await react("❌");
-      return Gifted.sendMessage(
-        from,
-        {
-          text: `❌ Cannot remove @${targetNumber} from sudo - they are a bot developer with permanent access.`,
-          mentions: [`${targetNumber}@s.whatsapp.net`],
-        },
-        { quoted: mek },
       );
     }
 

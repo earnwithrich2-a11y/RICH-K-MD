@@ -2,9 +2,12 @@
 name: Maintenance safety
 description: Permission and session-preservation constraints for owner restart/update operations.
 ---
-Maintenance access is limited to the configured owner, connected account or explicit sudo users, not the bot's broader developer/super-user role.
+Maintenance access is limited to the connected account or explicit sudo users,
+not a previous configured owner or the bot's broader super-user role.
 
-**Why:** The existing global super-user list includes developer numbers unrelated to owner consent. The user explicitly requires strict owner/connected/sudo authorization for restart and update.
+**Why:** The user now hosts the bot for multiple users and requires dynamic
+connected-account ownership without fixed phone privileges. A stored owner from
+another deployment is not authorization for the current account.
 
 **How to apply:** Verify identities independently of the broad role flag, fail closed on unknown identities, and never call logout or erase auth state during maintenance.
 

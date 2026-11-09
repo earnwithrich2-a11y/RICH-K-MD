@@ -45,6 +45,79 @@ function fixture(t, options = {}) {
     return { dir, archive, socket, sent, controller };
 }
 
+for (const jid of [chat, "4000@g.us"]) {
+    for (const kind of ["delete", "edit"]) {
+        for (const type of ["text", "image", "video", "audio", "sticker"]) {
+            test(`store-only ${type} ${kind} in ${jid} recovers privately with the clean header`, async t => {
+                const content = type === "text" ? { conversation: "before" } :
+                    { [`${type}Message`]: { url: "https://example.test/media", mimetype: `${type}/test`,
+                        caption: "before", ...(type === "audio" ? { ptt: true } : {}) } };
+                const saved = original("store-only", content, jid);
+                const calls = [];
+                const f = fixture(t, { store: { loadMessage: (requestedChat, id) => {
+                    calls.push([requestedChat, id]); return Promise.resolve(saved);
+                } } });
+                f.socket.groupMetadata = async () => ({ subject: "Test Group" });
+                f.socket.ev.emit("messages.update", [{
+                    key: { remoteJid: jid, id: saved.key.id },
+                    update: { message: { protocolMessage: {
+                        type: kind === "delete" ? 0 : 14, key: saved.key,
+                        ...(kind === "edit" ? { editedMessage: { conversation: "after" } } : {}),
+                    } } },
+                }]);
+                await f.controller.flush();
+                assert.deepEqual(calls, [[jid, saved.key.id]]);
+                assert.ok(f.sent.every(item => item.jid === connectedUser));
+                assert.equal(f.sent[0].content.text.split("\n")[0],
+                    kind === "delete" ? "🗑️ DELETED MESSAGE DETECTED" : "✏️ EDITED MESSAGE DETECTED");
+                assert.match(f.sent[0].content.text, /From: @1000/);
+                assert.ok(f.sent[0].content.text.includes(jid.endsWith("@g.us") ? "Chat: Test Group" : "Chat: Private DM"));
+                if (type === "text") assert.match(f.sent[0].content.text, /before/);
+                else {
+                    assert.equal(f.sent.length, 2);
+                    assert.deepEqual(fs.readFileSync(f.sent[1].content[type].url), Buffer.from("original media"));
+                    if (type === "audio") assert.equal(f.sent[1].content.ptt, true);
+                }
+                if (kind === "edit") assert.match(f.sent[0].content.text, /Edited to: after/);
+            });
+        }
+    }
+}
+
+test("store lookup failures and mismatched chat originals cannot crash or leak another conversation", async t => {
+    for (const loadMessage of [
+        async () => { throw new Error("database unavailable"); },
+        async () => original("missing", { conversation: "foreign secret" }, "other@g.us"),
+    ]) {
+        const f = fixture(t, { store: { loadMessage } });
+        f.socket.ev.emit("messages.update", [{
+            key: { remoteJid: chat, id: "missing" },
+            update: { message: { protocolMessage: { type: 0, key: { id: "missing" } } } },
+        }]);
+        await f.controller.flush();
+        assert.equal(f.sent.length, 1);
+        assert.doesNotMatch(f.sent[0].content.text, /foreign secret/);
+        assert.match(f.sent[0].content.text, /original was not received/);
+    }
+});
+
+test("store fallback follows only the transport-supplied private chat alias", async t => {
+    const calls = [];
+    const f = fixture(t, { store: { loadMessage: (jid, id) => {
+        calls.push([jid, id]);
+        return jid === chat ? original("alias-original") : null;
+    } } });
+    f.socket.ev.emit("messages.update", [{
+        key: { remoteJid: "9000@lid", remoteJidAlt: chat, id: "alias-original" },
+        update: { message: { protocolMessage: { type: 0, key: { id: "alias-original" } } } },
+    }]);
+    await f.controller.flush();
+    assert.deepEqual(calls, [["9000@lid", "alias-original"], [chat, "alias-original"]]);
+    assert.equal(f.sent.length, 1);
+    assert.match(f.sent[0].content.text, /Original Message: original text/);
+    assert.equal(f.sent[0].jid, connectedUser);
+});
+
 test("captures whole batch immediately, even when revoke appears before original", async t => {
     const f = fixture(t);
     f.socket.ev.emit("messages.upsert", { messages: [protocol(0), original()] });
@@ -54,7 +127,7 @@ test("captures whole batch immediately, even when revoke appears before original
     assert.equal(f.sent[0].jid, connectedUser);
     assert.match(f.sent[0].content.text, /original text/);
     assert.match(f.sent[0].content.text, /Timestamp: 2024-07-03T09:46:40\.000Z/);
-    assert.match(f.sent[0].content.text, /Sender: @1000 \(Test User\)/);
+    assert.match(f.sent[0].content.text, /From: @1000 \(Test User\)/);
     assert.deepEqual(f.sent[0].content.mentions, ["1000@s.whatsapp.net"]);
     assert.equal(f.archive.due().length, 0);
 });
@@ -123,7 +196,7 @@ test("verified alternate chat addresses recover originals without an unrestricte
     revoke.message.protocolMessage.key.remoteJid = "verified-peer@lid";
     f.socket.ev.emit("messages.upsert", { messages: [revoke] });
     await f.controller.flush();
-    assert.match(f.sent[0].content.text, /Original: original text/);
+    assert.match(f.sent[0].content.text, /Original(?: Message)?: original text/);
     assert.equal(f.archive.find("unknown-peer@lid", "original"), null);
     // The verified alias also works after eviction from RAM, as after restart.
     f.archive.memory.clear();
@@ -144,7 +217,7 @@ test("a failed original SQLite write cannot stop immediate RAM capture or text r
     assert.equal(f.archive.memory.has("second"), true);
     await f.controller.flush();
     assert.match(f.sent[0].content.text, /🗑️ Recovered deleted message from @1000/);
-    assert.match(f.sent[0].content.text, /Original: original text/);
+    assert.match(f.sent[0].content.text, /Original(?: Message)?: original text/);
 });
 
 test("group revoke identifies the admin deleter separately from the original author", async t => {
@@ -173,7 +246,7 @@ test("protocol revoke updates with an ID-only key inherit their chat from the SD
     }]);
     await f.controller.flush();
     assert.equal(f.sent.length, 1);
-    assert.match(f.sent[0].content.text, /Original: original text/);
+    assert.match(f.sent[0].content.text, /Original(?: Message)?: original text/);
 });
 
 test("native owner-originated revoke updates recover a known incoming original, not bot-sent content", async t => {
@@ -188,7 +261,7 @@ test("native owner-originated revoke updates recover a known incoming original, 
     await f.controller.flush();
     assert.equal(f.sent.length, 1);
     assert.equal(f.sent[0].jid, connectedUser);
-    assert.match(f.sent[0].content.text, /Original: original text/);
+    assert.match(f.sent[0].content.text, /Original(?: Message)?: original text/);
     assert.match(f.sent[0].content.text, /Deleted by: @3000/);
     f.socket.ev.emit("messages.update", [{
         key: { remoteJid: chat, id: "bot-sent-original", fromMe: true },
@@ -209,7 +282,7 @@ test("a transport-supplied alternate address recovers phone originals after a LI
     await f.controller.flush();
     assert.equal(f.sent.length, 1);
     assert.equal(f.sent[0].jid, connectedUser);
-    assert.match(f.sent[0].content.text, /Original: original text/);
+    assert.match(f.sent[0].content.text, /Original(?: Message)?: original text/);
 });
 
 test("protocol payloads cannot use an unverified chat or alternate address to select another original", async t => {
@@ -221,7 +294,7 @@ test("protocol payloads cannot use an unverified chat or alternate address to se
     f.socket.ev.emit("messages.upsert", { messages: [deleted] });
     await f.controller.flush();
     assert.equal(f.sent.length, 1);
-    assert.doesNotMatch(f.sent[0].content.text, /Original: original text/);
+    assert.doesNotMatch(f.sent[0].content.text, /Original(?: Message)?: original text/);
     assert.match(f.sent[0].content.text, /original was not received/);
 });
 
@@ -279,7 +352,7 @@ test("recoveries wait for an authenticated connection and drain to the connected
     assert.notEqual(f.sent[0].jid, "2000@s.whatsapp.net");
 });
 
-test("in-chat mode sends group recoveries to their original group", async t => {
+test("legacy in-chat modes now keep group recoveries in the connected account's DM", async t => {
     const group = "4000@g.us";
     const f = fixture(t, {
         getSettings: async () => ({ ANTIDELETE: "inchat", ANTI_EDIT: "inchat" }),
@@ -291,7 +364,7 @@ test("in-chat mode sends group recoveries to their original group", async t => {
         } }, group),
     ] });
     await f.controller.flush();
-    assert.equal(f.sent[0].jid, group);
+    assert.equal(f.sent[0].jid, connectedUser);
     assert.match(f.sent[0].content.text, /group text/);
 });
 
@@ -310,7 +383,7 @@ test("handles protocol 14 plus SDK editedMessage update once; keeps first origin
     f.socket.ev.emit("messages.upsert", { messages: [protocol(0)] });
     await f.controller.flush();
     assert.equal(f.sent.length, 2);
-    assert.match(f.sent[1].content.text, /Original: original text/);
+    assert.match(f.sent[1].content.text, /Original Message: original text/);
 });
 
 test("revoke updates are deduplicated with protocol events", async t => {
@@ -397,8 +470,8 @@ test("failed media send retries without repeating the already delivered alert", 
     };
     f.socket.ev.emit("messages.upsert", { messages: [original("original", { audioMessage: { ptt: true } }), protocol(0)] });
     await f.controller.flush();
-    assert.match(f.sent[0].content.text, /Original: \[audioMessage\]/);
-    assert.match(f.sent[0].content.text, /Sender: @1000 \(Test User\)/);
+    assert.match(f.sent[0].content.text, /Original(?: Message)?: \[audioMessage\]/);
+    assert.match(f.sent[0].content.text, /From: @1000 \(Test User\)/);
     assert.deepEqual(f.sent[0].content.mentions, ["1000@s.whatsapp.net"]);
     f.archive.db.prepare("UPDATE deliveries SET next = 0").run();
     await f.controller.flush();

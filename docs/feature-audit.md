@@ -25,8 +25,10 @@ loaded by the application and were left alone.
 - A one-time rollout turns the listed optional automations OFF, including old
   enabled defaults. Later choices persist across restarts. Anti-Delete, Anti-Edit,
   URL lock, anti-link and other existing protection settings are not reset.
-- Bot-wide settings and status saving require the connected account, configured
-  owner or approved sudo identity. Anti-kick requires group admin/owner rights;
+- Bot-wide settings and status saving require the connected account or an
+  approved sudo identity. Owner identity is detected from the active socket;
+  stored owner numbers and built-in developer lists do not grant access.
+  Anti-kick requires group admin/owner rights;
   enabling it also requires the bot to be an admin.
 - Auto-like requires `.autoviewstatus on`. Use `.statusemojis ❤️,💛` to select emojis.
 - `.autoreact on/off` and `.autoread on/off` retain their existing additional

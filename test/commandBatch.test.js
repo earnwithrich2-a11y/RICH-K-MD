@@ -30,6 +30,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
             extractMessageText: require("../RICHK-MD-core/connection/serializer").extractMessageText,
             ...require("../RICHK-MD-core/connection/commandRuntime"),
             getCachedSudoNumbers: () => [],
+            connectedOwnerJid: require("../RICHK-MD-core/connection/ownerIdentity").connectedOwnerJid,
             setTimeout() {},
             runCommandOutput: require("../RICHK-MD-core/branding").runCommandOutput,
             menuPromo: { maybeSend: async () => false },
@@ -64,7 +65,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
                 },
             }),
             getGroupInfo: async (_socket, _from, _botId, sender) => ({ sender }),
-            buildSuperUsers: async () => realSerializer ? ["synthetic-bot@s.whatsapp.net"] : [],
+            buildSuperUsers: async (_settings, _sudo, botId) => realSerializer ? [standardizeJid(botId)] : [],
             getSudoNumbers: async () => [],
             canShowCurrentChannelJid: () => false,
             findBodyCommand: () => null,
@@ -79,7 +80,7 @@ function dispatcherHarness(failFirstSettingsRead = false, ev = new EventEmitter(
         },
     );
     const socket = {
-        user: { id: realSerializer ? "synthetic-bot:7@s.whatsapp.net" : "synthetic-bot" }, ev,
+        user: { id: realSerializer ? `${ownerNumber || "synthetic-bot"}:7@s.whatsapp.net` : "synthetic-bot" }, ev,
         sendMessage: async (from, payload, options) => {
             if (payload.react) {
                 reactions.push({ from, payload });
@@ -303,7 +304,7 @@ test("owner LID commands require a verified phone mapping and self-chat works wi
     for (const [id, remoteJid] of [
         ["verified-owner", "verified-owner@lid"],
         ["unverified-lid", "15550000002@lid"],
-        ["self-without-flag", "synthetic-bot@s.whatsapp.net"],
+        ["self-without-flag", "15550000002@s.whatsapp.net"],
     ]) {
         const ms = message(id);
         Object.assign(ms.key, { fromMe: false, remoteJid });
@@ -311,7 +312,23 @@ test("owner LID commands require a verified phone mapping and self-chat works wi
     }
     assert.deepEqual(f.calls, ["verified-owner", "self-without-flag"]);
     assert.equal(f.replies[0].from, "verified-owner@lid");
-    assert.equal(f.replies[1].from, "synthetic-bot@s.whatsapp.net");
+    assert.equal(f.replies[1].from, "15550000002@s.whatsapp.net");
+});
+
+test("a stale owner setting never grants access after connecting another WhatsApp account", async () => {
+    const f = dispatcherHarness(false, new EventEmitter(), {
+        realSerializer: true, mode: "private", ownerNumber: "15550000002",
+    });
+    f.socket.user.id = "15550000003:7@s.whatsapp.net";
+    for (const [id, remoteJid] of [
+        ["stale-owner", "15550000002@s.whatsapp.net"],
+        ["connected-owner", "15550000003@s.whatsapp.net"],
+    ]) {
+        const ms = message(id);
+        Object.assign(ms.key, { fromMe: false, remoteJid });
+        await f.receive({ messages: [ms], type: "notify" });
+    }
+    assert.deepEqual(f.calls, ["connected-owner"]);
 });
 
 test("old owner command history is not replayed", async () => {

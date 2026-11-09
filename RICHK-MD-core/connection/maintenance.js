@@ -25,7 +25,7 @@ async function isMaintenanceOwner(socket, context) {
     if ((context.m || context.mek)?.key?.fromMe === true) return true;
     const sender = identity(context.sender);
     if (!sender) return false;
-    const own = [context.ownerNumber, socket.user?.id, socket.user?.lid,
+    const own = [socket.user?.id, socket.user?.lid,
         socket.authState?.creds?.me?.id, socket.authState?.creds?.me?.lid];
     if (own.map(identity).filter(Boolean).includes(sender)) return true;
     if (String(context.sudoNumbers || "").split(",").map(identity).filter(Boolean).includes(sender)) return true;

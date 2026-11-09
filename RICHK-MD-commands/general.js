@@ -86,7 +86,7 @@ gmd(
     const { mek, q, sender, react, pushName, botPrefix, isSuperUser, reply } =
       conText;
     const reportedMessages = {};
-    const devlopernumber = "254799916673";
+    const { connectedOwnerJid } = require("../RICHK-MD-core/connection/ownerIdentity");
     try {
       if (!isSuperUser) return reply("*Owner Only Command*");
       if (!q)
@@ -102,8 +102,10 @@ gmd(
       reportedMessages[messageId] = true;
       const textt = `*| REQUEST/REPORT |*`;
       const teks1 = `\n\n*User*: @${sender.split("@")[0]}\n*Request:* ${q}`;
-      Gifted.sendMessage(
-        devlopernumber + "@s.whatsapp.net",
+      const owner = connectedOwnerJid(Gifted);
+      if (!owner) return await reply("The connected account is unavailable. Please try again later.");
+      await Gifted.sendMessage(
+        owner,
         {
           text: textt + teks1,
           mentions: [sender],

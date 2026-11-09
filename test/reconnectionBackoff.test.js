@@ -15,15 +15,15 @@ function harness(restart = async () => {}) {
     return { socket, jobs, event, close: code => event({ connection: "close", lastDisconnect: { error: new Boom("closed", { statusCode: code }) } }) };
 }
 
-test("408, 428, 503 and 515 reconnect once despite duplicate close events", async () => {
-    for (const code of [408, 428, 503, 515]) {
+test("all non-401 closes reconnect after 15 seconds once, including 500 and duplicate events", async () => {
+    for (const code of [400, 403, 408, 409, 428, 440, 500, 503, 515, 599]) {
         let starts = 0;
         const f = harness(async () => { starts++; });
         await f.event({ connection: "open" });
         await f.close(code);
         await f.close(code);
         assert.equal(f.jobs.length, 1);
-        assert.equal(f.jobs[0].delay, 5000);
+        assert.equal(f.jobs[0].delay, 15000);
         await f.jobs[0].fn();
         await f.close(code);
         assert.equal(starts, 1);
@@ -31,14 +31,24 @@ test("408, 428, 503 and 515 reconnect once despite duplicate close events", asyn
     }
 });
 
-test("failed restarts are caught and retried with bounded backoff; logout cancels pending retries", async () => {
+test("failed restarts retry every 15 seconds; logout cancels pending retries", async () => {
     const f = harness(async () => { throw new Error("offline"); });
     await f.event({ connection: "open" });
     await f.close(503);
     for (let i = 0; i < 10; i++) await f.jobs[i].fn();
-    assert.equal(f.jobs[1].delay, 10000);
-    assert.ok(f.jobs.every(job => job.delay <= 300000));
+    assert.ok(f.jobs.every(job => job.delay === 15000));
     await f.close(401);
     assert.equal(f.jobs.at(-1).cancelled, true);
     assert.equal(f.socket.authRequired, true);
+});
+
+test("401 never schedules a reconnect and maintenance shutdown never starts a competing socket", async () => {
+    const loggedOut = harness();
+    await loggedOut.close(401);
+    assert.equal(loggedOut.jobs.length, 0);
+    assert.equal(loggedOut.socket.authRequired, true);
+    const maintenance = harness();
+    maintenance.socket.maintenanceRestarting = true;
+    await maintenance.close(500);
+    assert.equal(maintenance.jobs.length, 0);
 });
