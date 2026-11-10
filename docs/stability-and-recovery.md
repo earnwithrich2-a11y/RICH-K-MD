@@ -14,6 +14,8 @@
   background caching. Recovered media goes only to the connected bot owner's DM,
   never to a group, peer or requesting contact. Success and failure are silent
   in the source chat: no confirmation, error, prefix reaction or reveal reaction.
+  When the original keys were not captured, the requested missing-key status
+  goes only to the connected owner's private DM.
   Optional command presence/read/reaction automation is skipped for these commands.
   Owner-authored 👍 reactions are supported through both SDK event shapes;
   duplicated events, bot-generated reactions and ordinary contacts are ignored.

@@ -6,13 +6,15 @@ description: Why opened view-once recovery needs saved originals, and why manual
 Manual view-once recovery must send recovered media only to the connected bot
 owner's private inbox, never to the requester or source group/peer.
 
-**Why:** The user subsequently required owner-only delivery and clean target chats
-so contacts do not receive recovery errors or discover a save from bot responses.
+**Why:** The user requires owner-only delivery and clean target chats, while
+explicitly requesting a private owner status when decryption keys are missing.
 
 **How to apply:** Resolve the connected owner before downloading and preserve
-owner/approved-sudo command access. Fail silently. Do not send success notices,
-error text, prefix reactions or reveal reactions into the source chat. Owner-authored
-👍 reactions may trigger saving, but bot-generated reaction echoes must not loop.
+owner/approved-sudo command access. Do not send success notices, error text,
+prefix reactions or reveal reactions into the source chat. When the original
+has no captured decryption keys, send the user's specified missing-key notice
+only to the connected owner's DM. Owner-authored 👍 reactions may trigger saving,
+but bot-generated reaction echoes must not loop.
 
 Opening a view-once message on a phone can leave its quote without download
 metadata. Recovery may still work from a saved original or previously downloaded

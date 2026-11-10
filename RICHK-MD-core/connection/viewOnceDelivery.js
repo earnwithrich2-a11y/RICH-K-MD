@@ -3,6 +3,9 @@ const { connectedOwnerJid, isConnectedOwner } = require("./ownerIdentity");
 const { unwrap } = require("./recoveryArchive");
 const { installAutomatedMessageGuard } = require("./automatedMessageGuard");
 
+const MISSING_KEYS_NOTICE =
+    "⚠️ This View-Once arrived before the bot was online, so WhatsApp did not deliver the decryption keys.";
+
 async function saveViewOnceSilently(socket, context, { recover = recoverViewOnce } = {}) {
     try {
         const message = context.mek || context.m || {};
@@ -12,7 +15,13 @@ async function saveViewOnceSilently(socket, context, { recover = recoverViewOnce
         const media = await recover(socket, context);
         await socket.sendMessage(owner, media);
         return true;
-    } catch {
+    } catch (error) {
+        if (error?.code === "VIEW_ONCE_KEYS_MISSING") {
+            try {
+                const owner = connectedOwnerJid(socket);
+                if (owner) await socket.sendMessage(owner, { text: MISSING_KEYS_NOTICE });
+            } catch { /* The private status is best-effort; never fall back to the source chat. */ }
+        }
         console.warn("[ViewOnce] Private save unavailable; source chat left silent.");
         return false;
     }

@@ -54,6 +54,56 @@ for (const type of ["image", "video", "audio"]) {
     }
 }
 
+for (const wrapper of ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"]) {
+    for (const type of ["image", "video", "audio"]) {
+        test(`${wrapper} ${type}: arrival starts prefetch before the message is opened`, async t => {
+            const s = socket(), cache = new ViewOnceCache({ sweepMs: 0 }), buffers = new ViewOnceBuffers();
+            let downloads = 0;
+            const id = `arrival-${wrapper}-${type}`;
+            const arrived = {
+                key: { remoteJid: "source@lid", id },
+                message: { [wrapper]: { message: { [`${type}Message`]: {
+                    mediaKey: Buffer.from("decryption key"), directPath: "/view-once",
+                    mimetype: `${type}/test`, ...(type === "audio" ? { ptt: true } : {}),
+                } } } },
+            };
+            attachViewOnceStore(s, {
+                cache, buffers,
+                getSettings: async () => ({ VIEW_ONCE_CACHE: "true" }),
+                prefetchOptions: { save: async (mediaType, media) => {
+                    downloads++;
+                    assert.equal(mediaType, `${type}Message`);
+                    assert.ok(media.mediaKey, "download starts with the received decryption key");
+                    return { [type]: Buffer.from(`cached ${type}`) };
+                } },
+                store: { loadMessage: async () => null }, archive: { find: () => null },
+            });
+            t.after(() => { s.viewOnceStore.dispose(); cache.destroy(); buffers.destroy(); });
+
+            // The upsert listener must capture and queue the media before other handlers run.
+            s.ev.emit("messages.upsert", { type: "notify", messages: [arrived] });
+            arrived.message = { [wrapper]: { message: { [`${type}Message`]: { viewOnce: true } } } };
+            const context = {
+                isSuperUser: true,
+                mek: {
+                    key: { id: "reveal-command", remoteJid: "source@g.us" },
+                    message: { extendedTextMessage: { contextInfo: {
+                        stanzaId: id,
+                        quotedMessage: { [wrapper]: { message: { [`${type}Message`]: { viewOnce: true } } } },
+                    } } },
+                },
+            };
+            const saved = await saveViewOnceSilently(s, context);
+            assert.equal(saved, true);
+            assert.equal(downloads, 1);
+            assert.equal(s.sent.length, 1);
+            assert.equal(s.sent[0].jid, owner);
+            assert.deepEqual(s.sent[0].content[type], Buffer.from(`cached ${type}`));
+            assert.equal(s.sent[0].content.text, undefined);
+        });
+    }
+}
+
 test("missing owner, unauthorized sender and failed recovery/delivery never call source reply or reaction", async () => {
     for (const mode of ["missing", "unauthorized", "recovery", "delivery"]) {
         const s = socket();
@@ -74,6 +124,35 @@ test("missing owner, unauthorized sender and failed recovery/delivery never call
         assert.equal(result, false);
         assert.deepEqual(s.sent, []);
     }
+});
+
+test("missing decryption keys produce the requested status only in the connected owner's DM", async () => {
+    const s = socket();
+    const err = new Error("no decryption keys");
+    err.code = "VIEW_ONCE_KEYS_MISSING";
+    const result = await saveViewOnceSilently(s, {
+        isSuperUser: true, sender: "200@s.whatsapp.net",
+        mek: { key: { remoteJid: "public-source@g.us" } },
+        reply: () => assert.fail("The source chat must remain silent"),
+        react: () => assert.fail("The source chat must remain silent"),
+    }, { recover: async () => { throw err; } });
+    assert.equal(result, false);
+    assert.deepEqual(s.sent, [{
+        jid: owner,
+        content: { text: "⚠️ This View-Once arrived before the bot was online, so WhatsApp did not deliver the decryption keys." },
+        options: undefined,
+    }]);
+});
+
+test("other download errors do not send an offline-keys notice to either chat", async () => {
+    const s = socket();
+    const err = new Error("media service temporarily unavailable");
+    err.code = "VIEW_ONCE_DOWNLOAD_FAILED";
+    await saveViewOnceSilently(s, {
+        isSuperUser: true, mek: { key: { remoteJid: "source@g.us" } },
+        reply: () => assert.fail("No public error"),
+    }, { recover: async () => { throw err; } });
+    assert.deepEqual(s.sent, []);
 });
 
 function reaction(id, { fromMe = true, sender = "200@s.whatsapp.net", text = "👍", targetFromMe = false } = {}) {

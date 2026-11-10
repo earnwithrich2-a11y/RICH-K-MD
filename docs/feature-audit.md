@@ -40,8 +40,9 @@ loaded by the application and were left alone.
 - Automatic view-once saving also sends only to the connected account's DM.
   It cannot recover media WhatsApp no longer supplies.
 - Manual `.vv` and `.👍` support view-once photos, videos and audio and send full
-  buffers only to the connected bot owner's private inbox. Failures are silent:
-  no error, success confirmation or bot reaction is sent to the source chat.
+  buffers only to the connected bot owner's private inbox. Failures never show
+  in the source chat: there are no errors, confirmations or bot-added reactions.
+  Missing decryption keys produce the requested status only in the owner's DM.
   Owner-authored 👍 reactions also trigger recovery, with SDK replay deduplication
   and no automatic-reaction loops. Existing owner/sudo command access is retained;
   ordinary contacts cannot trigger an owner-only save.
