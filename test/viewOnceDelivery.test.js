@@ -126,10 +126,10 @@ test("missing owner, unauthorized sender and failed recovery/delivery never call
     }
 });
 
-test("missing decryption keys produce the requested status only in the connected owner's DM", async () => {
+test("a failed Baileys download produces an error only in the connected owner's DM", async () => {
     const s = socket();
-    const err = new Error("no decryption keys");
-    err.code = "VIEW_ONCE_KEYS_MISSING";
+    const err = new Error("WhatsApp media download returned 404");
+    err.code = "VIEW_ONCE_DOWNLOAD_FAILED";
     const result = await saveViewOnceSilently(s, {
         isSuperUser: true, sender: "200@s.whatsapp.net",
         mek: { key: { remoteJid: "public-source@g.us" } },
@@ -139,19 +139,18 @@ test("missing decryption keys produce the requested status only in the connected
     assert.equal(result, false);
     assert.deepEqual(s.sent, [{
         jid: owner,
-        content: { text: "⚠️ This View-Once arrived before the bot was online, so WhatsApp did not deliver the decryption keys." },
+        content: { text: "⚠️ WhatsApp couldn't download this View-Once media. It may have expired or the media server rejected the request." },
         options: undefined,
     }]);
 });
 
-test("other download errors do not send an offline-keys notice to either chat", async () => {
+test("failure to deliver recovered media does not report a download error", async () => {
     const s = socket();
-    const err = new Error("media service temporarily unavailable");
-    err.code = "VIEW_ONCE_DOWNLOAD_FAILED";
+    s.sendMessage = async () => { throw Error("DM delivery failed"); };
     await saveViewOnceSilently(s, {
         isSuperUser: true, mek: { key: { remoteJid: "source@g.us" } },
         reply: () => assert.fail("No public error"),
-    }, { recover: async () => { throw err; } });
+    }, { recover: async () => ({ image: Buffer.from("recovered") }) });
     assert.deepEqual(s.sent, []);
 });
 

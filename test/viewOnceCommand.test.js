@@ -74,7 +74,7 @@ test("vv and thumbs-up contain download, private-send and acknowledgment failure
         assert.deepEqual(expired.replies, []);
         assert.equal(expired.sent[0][0], "15550000001@s.whatsapp.net");
         assert.equal(expired.sent[0][1].text,
-            "⚠️ This View-Once arrived before the bot was online, so WhatsApp did not deliver the decryption keys.");
+            "⚠️ WhatsApp couldn't download this View-Once media. It may have expired or the media server rejected the request.");
         const failedSend = await runReveal({ ...request, socketOverrides: {
             sendMessage: async () => { throw new Error("offline"); },
         } });
@@ -134,16 +134,17 @@ test("view-once access restrictions are preserved for both aliases", async () =>
     assert.equal(result.downloads.length, 0);
 });
 
-test("vv sends only the private missing-keys status when the original is unavailable", async () => {
+test("vv sends a download failure only to the owner's private DM", async () => {
     const result = await runReveal({
         key: { remoteJid: "15550000002@s.whatsapp.net" },
         quoted: { viewOnceMessageV2: { message: { imageMessage: {} } } },
         sender: "15550000002@s.whatsapp.net",
+        socketOverrides: { testDownload: async () => { throw new Error("Baileys download failed"); } },
     });
     assert.equal(result.sent.length, 1);
     assert.equal(result.sent[0][0], "15550000001@s.whatsapp.net");
     assert.equal(result.sent[0][1].text,
-        "⚠️ This View-Once arrived before the bot was online, so WhatsApp did not deliver the decryption keys.");
+        "⚠️ WhatsApp couldn't download this View-Once media. It may have expired or the media server rejected the request.");
     assert.deepEqual(result.replies, []);
 });
 
@@ -152,11 +153,12 @@ test("every reveal alias remains silent when used without a recoverable original
         const result = await runReveal({
             alias, key: { remoteJid: "source@g.us", participant: "200@s.whatsapp.net" },
             quoted: { imageMessage: { viewOnce: true } }, sender: "200@s.whatsapp.net", isGroup: true,
+            socketOverrides: { testDownload: async () => { throw new Error("Baileys download failed"); } },
         });
         assert.equal(result.sent.length, 1);
         assert.equal(result.sent[0][0], "15550000001@s.whatsapp.net");
         assert.equal(result.sent[0][1].text,
-            "⚠️ This View-Once arrived before the bot was online, so WhatsApp did not deliver the decryption keys.");
+            "⚠️ WhatsApp couldn't download this View-Once media. It may have expired or the media server rejected the request.");
         assert.deepEqual(result.replies, []);
     }
 });

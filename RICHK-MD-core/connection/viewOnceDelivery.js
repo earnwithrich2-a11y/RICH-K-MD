@@ -3,26 +3,31 @@ const { connectedOwnerJid, isConnectedOwner } = require("./ownerIdentity");
 const { unwrap } = require("./recoveryArchive");
 const { installAutomatedMessageGuard } = require("./automatedMessageGuard");
 
-const MISSING_KEYS_NOTICE =
-    "⚠️ This View-Once arrived before the bot was online, so WhatsApp did not deliver the decryption keys.";
+const DOWNLOAD_FAILED_NOTICE =
+    "⚠️ WhatsApp couldn't download this View-Once media. It may have expired or the media server rejected the request.";
 
 async function saveViewOnceSilently(socket, context, { recover = recoverViewOnce } = {}) {
-    try {
-        const message = context.mek || context.m || {};
-        if (!context.isSuperUser && !message.key?.fromMe && !isConnectedOwner(socket, context.sender)) return false;
-        const owner = connectedOwnerJid(socket);
-        if (!owner) return false; // Never fall back to the current chat or requester.
-        const media = await recover(socket, context);
-        await socket.sendMessage(owner, media);
-        return true;
-    } catch (error) {
-        if (error?.code === "VIEW_ONCE_KEYS_MISSING") {
+    const message = context.mek || context.m || {};
+    if (!context.isSuperUser && !message.key?.fromMe && !isConnectedOwner(socket, context.sender)) return false;
+    const owner = connectedOwnerJid(socket);
+    if (!owner) return false; // Never fall back to the current chat or requester.
+    let media;
+    try { media = await recover(socket, context); }
+    catch (error) {
+        if (error?.code === "VIEW_ONCE_DOWNLOAD_FAILED") {
             try {
-                const owner = connectedOwnerJid(socket);
-                if (owner) await socket.sendMessage(owner, { text: MISSING_KEYS_NOTICE });
+                await socket.sendMessage(owner, { text: DOWNLOAD_FAILED_NOTICE });
             } catch { /* The private status is best-effort; never fall back to the source chat. */ }
         }
         console.warn("[ViewOnce] Private save unavailable; source chat left silent.");
+        return false;
+    }
+    if (!media) return false;
+    try {
+        await socket.sendMessage(owner, media);
+        return true;
+    } catch {
+        console.warn("[ViewOnce] Private delivery failed; source chat left silent.");
         return false;
     }
 }

@@ -88,7 +88,7 @@ test("a stale stored URL does not prevent trying a complete fresh quote of the s
         return { image: Buffer.from("fresh photo") };
     } });
     assert.deepEqual(result.image, Buffer.from("fresh photo"));
-    assert.deepEqual(calls, ["/old-photo", "/fresh-photo"]);
+    assert.deepEqual(calls, ["/fresh-photo"], "the quoted object is tried before any cache lookup");
 });
 
 test("outgoing commands in a peer chat never gain access to the connected account's self-chat cache", async () => {
@@ -233,10 +233,46 @@ test("a completed background copy can rescue a failed refresh", async () => {
     assert.deepEqual(result.image, Buffer.from("late copy"));
 });
 
-test("ordinary media and missing quotes are rejected without downloading", async () => {
-    for (const quoted of [undefined, {}, { imageMessage: { url: "https://example.test/normal" } }]) {
-        await assert.rejects(recoverViewOnce({}, context(quoted)), /Please reply to a view-once/);
+for (const wrapper of ["viewOnceMessage", "viewOnceMessageV2", "viewOnceMessageV2Extension"]) {
+    for (const type of ["image", "video", "audio"]) {
+        test(`${wrapper} quoted ${type} downloads immediately without a cache or URL precheck`, async () => {
+            const media = { mediaKey: Buffer.from("direct key"), mimetype: `${type}/test` };
+            const socket = { viewOnceStore: {
+                getById: () => assert.fail("Cache is not required before the direct download"),
+                getMessage: () => assert.fail("Cache is not required before the direct download"),
+                getMedia: () => assert.fail("Cache is not required before the direct download"),
+            } };
+            let calls = 0;
+            const result = await recoverViewOnce(socket, context({
+                [wrapper]: { message: { [`${type}Message`]: media } },
+            }), { save: async (mediaType, quotedMedia) => {
+                calls++;
+                assert.equal(mediaType, `${type}Message`);
+                assert.deepEqual(quotedMedia.mediaKey, media.mediaKey);
+                return { [type]: Buffer.from("downloaded directly") };
+            } });
+            assert.equal(calls, 1);
+            assert.deepEqual(result[type], Buffer.from("downloaded directly"));
+        });
     }
+}
+
+test("plain quoted media is attempted directly and an empty quote returns silently", async () => {
+    const absent = await recoverViewOnce({}, context(undefined), {
+        save: async () => assert.fail("No media object was available"),
+    });
+    assert.equal(absent, null);
+    let called = 0;
+    const normalQuote = await recoverViewOnce({}, context({
+        imageMessage: { url: "https://example.test/normal", mimetype: "image/jpeg" },
+    }), { save: async (type, media) => {
+        called++;
+        assert.equal(type, "imageMessage");
+        assert.equal(media.url, "https://example.test/normal");
+        return { image: Buffer.from("downloaded") };
+    } });
+    assert.equal(called, 1);
+    assert.deepEqual(normalQuote.image, Buffer.from("downloaded"));
 });
 
 test("real read-only archive adapter returns full originals and enforces private cache-file bounds", async t => {

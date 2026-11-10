@@ -27,6 +27,36 @@ function mediaQuality(media) {
     return Number(Boolean(media?.mediaKey)) * 2 + Number(Boolean(media?.url || media?.directPath));
 }
 
+function extractQuotedMedia(quoted) {
+    const roots = [quoted, quoted?.message, quoted?.msg, quoted?.quotedMessage];
+    const mediaTypes = ["imageMessage", "videoMessage", "audioMessage"];
+    for (const root of roots) {
+        let content = root;
+        const visited = new Set();
+        for (let depth = 0; content && typeof content === "object" && depth < 8; depth++) {
+            if (visited.has(content)) break;
+            visited.add(content);
+            const inner = content.viewOnceMessageV2?.message ||
+                content.viewOnceMessage?.message ||
+                content.viewOnceMessageV2Extension?.message ||
+                content.ephemeralMessage?.message ||
+                content.deviceSentMessage?.message;
+            if (inner) {
+                content = inner;
+                continue;
+            }
+            const mediaType = mediaTypes.find(type => content[type] && typeof content[type] === "object");
+            if (mediaType) return { mediaType, media: content[mediaType] };
+            if (content.message && typeof content.message === "object") {
+                content = content.message;
+                continue;
+            }
+            break;
+        }
+    }
+    return null;
+}
+
 // Owner-only manual recovery uses ID-only caches; durable store fallback stays scoped.
 function attachViewOnceStore(socket, { store, archive, cache, buffers, getSettings, prefetchOptions = {} }) {
     const recent = cache || new ViewOnceCache();
@@ -103,7 +133,30 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
         info.stanzaId || context.quotedKey?.id || context.quoted?.id || message?.quoted?.id;
     // Only authenticated envelope addresses may select a store's conversation.
     const chats = verifiedChats(socket, message);
-    const quotedMedia = extractViewOnceMedia(quoted);
+    const quotedMedia = extractQuotedMedia(quoted);
+    const attempted = new Set();
+    const statuses = new Set();
+    const downloadErrors = [];
+    function failed(error) {
+        downloadErrors.push(error);
+        const code = Number(error?.response?.status || error?.output?.statusCode || error?.statusCode);
+        if (Number.isInteger(code) && code >= 100 && code <= 599) statuses.add(code);
+    }
+    async function attemptDownload(mediaType, media) {
+        const fingerprint = safeStringify([mediaType, media?.mediaKey, media?.url, media?.directPath]);
+        if (attempted.has(fingerprint)) return null;
+        attempted.add(fingerprint);
+        try { return await save(mediaType, media); }
+        catch (error) { failed(error); return null; }
+    }
+
+    // Try the quoted object exactly as received first. Cache lookups are optional
+    // fallbacks and cannot prevent Baileys from attempting this download.
+    if (quotedMedia) {
+        const direct = await attemptDownload(quotedMedia.mediaType, quotedMedia.media);
+        if (direct) return direct;
+    }
+
     const originals = [];
     if (id) {
         try {
@@ -132,7 +185,7 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     }
     originals.sort((a, b) => mediaQuality(b.media) - mediaQuality(a.media));
     const mediaType = originals[0]?.mediaType || quotedMedia?.mediaType;
-    if (!mediaType) throw new Error("Please reply to a view-once image, video or audio message.");
+    if (!mediaType) return null;
     const candidates = originals.filter(item => item.mediaType === mediaType);
     if (quotedMedia?.mediaType === mediaType) candidates.push({
         ...quotedMedia, chat: chats[0], original: null,
@@ -141,11 +194,6 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     // version's URL, and never replace a good quote with stripped store fields.
     candidates.sort((a, b) => mediaQuality(b.media) - mediaQuality(a.media));
     const preferred = candidates[0];
-    const statuses = new Set();
-    function failed(error) {
-        const code = Number(error?.response?.status || error?.output?.statusCode || error?.statusCode);
-        if (Number.isInteger(code) && code >= 100 && code <= 599) statuses.add(code);
-    }
     async function cachedContent() {
         if (!id) return null;
         for (const chat of new Set([...originals.map(item => item.chat), ...chats])) {
@@ -159,21 +207,16 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     }
     const cached = await cachedContent();
     if (cached) return cached;
-    const attempted = new Set();
     for (const candidate of candidates) {
-        const { media } = candidate;
-        if (!media.url && !media.directPath) continue;
-        // The source list is tiny, but identical quotes must not repeat a slow download.
-        const fingerprint = safeStringify([media.mediaKey, media.url, media.directPath]);
-        if (attempted.has(fingerprint)) continue;
-        attempted.add(fingerprint);
-        try { return await save(mediaType, media); }
-        catch (error) { failed(error); }
+        const content = await attemptDownload(mediaType, candidate.media);
+        if (content) return content;
     }
     const refreshSource = candidates.find(item => item.original?.key && item.media.mediaKey) ||
         candidates.find(item => item.media.mediaKey);
+    let refreshAttempted = false;
     if (id && chats[0] && refreshSource && typeof socket.updateMediaMessage === "function") {
         const { media, original, chat } = refreshSource;
+        refreshAttempted = true;
         try {
             const key = original?.key || { ...context.quotedKey, remoteJid: chat || chats[0], id,
                 participant: info.participant || context.quotedKey?.participant };
@@ -183,15 +226,20 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
             }));
             const refreshed = await socket.updateMediaMessage(envelope);
             const fresh = unwrap(refreshed?.message || envelope.message)?.[mediaType];
-            if (fresh?.url || fresh?.directPath) return await save(mediaType, { ...media, ...fresh });
+            if (fresh?.url || fresh?.directPath) {
+                const content = await attemptDownload(mediaType, { ...media, ...fresh });
+                if (content) return content;
+            } else failed(new Error("WhatsApp returned no downloadable media"));
         } catch (error) { failed(error); }
     }
     // An early background download may have completed during the refresh attempt.
     const completed = await cachedContent();
     if (completed) return completed;
+    // No quote, cache or usable media object is not a downloadable failure;
+    // report only after Baileys was actually asked to fetch media.
+    if (!attempted.size && !refreshAttempted && !downloadErrors.length) return null;
     const error = new Error(UNAVAILABLE);
-    error.code = candidates.some(item => item.media.mediaKey)
-        ? "VIEW_ONCE_DOWNLOAD_FAILED" : "VIEW_ONCE_KEYS_MISSING";
+    error.code = "VIEW_ONCE_DOWNLOAD_FAILED";
     console.warn(`[ViewOnce] Recovery unavailable: reason=${error.code}; originalFound=${originals.length > 0}; ` +
         `mediaPath=${candidates.some(item => item.media.url || item.media.directPath)}; ` +
         `downloadAttempted=${attempted.size > 0}; httpStatus=${[...statuses].join(",") || "unknown"}.`);
