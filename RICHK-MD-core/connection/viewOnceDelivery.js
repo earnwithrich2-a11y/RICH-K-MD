@@ -2,9 +2,84 @@ const { recoverViewOnce } = require("./viewOnceDownload");
 const { connectedOwnerJid, isConnectedOwner } = require("./ownerIdentity");
 const { unwrap } = require("./recoveryArchive");
 const { installAutomatedMessageGuard } = require("./automatedMessageGuard");
+const { extractViewOnceMedia } = require("./viewOnceMedia");
+const { mediaContent } = require("./automationMedia");
 
 const DOWNLOAD_FAILED_NOTICE =
     "⚠️ WhatsApp couldn't download this View-Once media. It may have expired or the media server rejected the request.";
+const NO_VIEW_ONCE_QUOTE = "⚠️ Please reply to a View-Once photo or video.";
+const EXPIRED_MEDIA_ERROR = "❌ Could not download this media. It has expired on WhatsApp servers.";
+const DOWNLOAD_ERROR = "❌ Could not download this media. Please try again.";
+const DELIVERY_ERROR = "❌ Could not send the recovered media. Please try again.";
+
+function isExpiredMediaError(error) {
+    const status = Number(error?.statusCode ?? error?.status ?? error?.output?.statusCode ??
+        error?.data?.statusCode ?? error?.response?.status);
+    const detail = [error?.message, error?.data?.message, error?.output?.payload?.message]
+        .filter(Boolean).join(" ").toLowerCase();
+    return status === 404 || /\b404\b|expired|not found|no longer available/.test(detail);
+}
+
+async function revealQuotedViewOnce(socket, context, { download = mediaContent } = {}) {
+    const message = context.mek || context.ms || context.m || {};
+    const from = context.from || message.key?.remoteJid || "";
+    const reply = typeof context.reply === "function"
+        ? context.reply
+        : (text) => socket.sendMessage(from, { text }, { quoted: message });
+    const react = async (emoji) => {
+        try {
+            if (typeof context.react === "function") await context.react(emoji);
+            else if (message.key?.id && from) {
+                await socket.sendMessage(from, { react: { key: message.key, text: emoji } });
+            }
+        } catch { /* Reactions are best-effort; they must not block media recovery. */ }
+    };
+
+    const authorized = context.isSuperUser || message.key?.fromMe ||
+        isConnectedOwner(socket, context.sender);
+    if (!authorized) {
+        await reply("⛔ Only the bot owner can use this command.");
+        return false;
+    }
+
+    await react("⏳");
+
+    const quoted = context.quoted ?? context.quotedMsg ?? context.quotedMessage;
+    const quotedMessage = quoted?.message && typeof quoted.message === "object"
+        ? quoted.message
+        : quoted;
+    const found = extractViewOnceMedia(quotedMessage);
+    if (!found) {
+        await reply(NO_VIEW_ONCE_QUOTE);
+        return false;
+    }
+
+    let media;
+    try {
+        media = await download(found.mediaType, found.media);
+        if (!media) throw new Error("Baileys returned no media");
+    } catch (error) {
+        await reply(isExpiredMediaError(error) ? EXPIRED_MEDIA_ERROR : DOWNLOAD_ERROR);
+        return false;
+    }
+
+    const isGroup = context.isGroup ?? from.endsWith("@g.us");
+    const destination = isGroup ? connectedOwnerJid(socket) : from;
+    if (!destination) {
+        await reply("❌ Could not find the bot owner's private chat.");
+        return false;
+    }
+
+    try {
+        await socket.sendMessage(destination, media);
+    } catch {
+        await reply(DELIVERY_ERROR);
+        return false;
+    }
+
+    if (isGroup) await react("✅");
+    return true;
+}
 
 async function saveViewOnceSilently(socket, context, { recover = recoverViewOnce } = {}) {
     const message = context.mek || context.m || {};
@@ -90,4 +165,4 @@ function installViewOnceReactions(socket, { save = saveViewOnceSilently, now = D
     return { destroy, handle };
 }
 
-module.exports = { saveViewOnceSilently, installViewOnceReactions };
+module.exports = { revealQuotedViewOnce, saveViewOnceSilently, installViewOnceReactions };

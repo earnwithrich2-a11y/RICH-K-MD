@@ -97,7 +97,7 @@ gmd(
 ╰━━━━━━━━━━━━━━╯
 
 *👁️ VIEW ONCE*
-▸ *${p}vv* — Reply to a view-once message to save it
+▸ *${p}vv* — Reply to view-once media; groups send it to owner DM, private chats keep it here
 
 *📱 STATUS*
 ▸ *${p}autoviewstatus on/off* — ${formatSettingsStatus(settings.AUTO_READ_STATUS)} · Automatically view statuses

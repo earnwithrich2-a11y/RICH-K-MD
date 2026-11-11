@@ -16,6 +16,10 @@ const settingsSource = fs.readFileSync(
     path.join(projectRoot, "RICHK-MD-core/database/settings.js"),
     "utf8",
 );
+const viewOnceDeliverySource = fs.readFileSync(
+    path.join(projectRoot, "RICHK-MD-core/connection/viewOnceDelivery.js"),
+    "utf8",
+);
 
 function sourceBetween(source, startMarker, endMarker) {
     const start = source.indexOf(startMarker);
@@ -76,7 +80,7 @@ test("plugin reaction helper remains non-blocking", () => {
     assert.doesNotMatch(helper, /const\s+react\s*=\s*async\b/);
 });
 
-test("view-once reveals use a private recipient rather than the current group", () => {
+test("view-once command uses the direct quoted-media delivery handler", () => {
     const ownerSource = fs.readFileSync(
         path.join(projectRoot, "RICHK-MD-commands/owner.js"),
         "utf8",
@@ -87,8 +91,8 @@ test("view-once reveals use a private recipient rather than the current group", 
         'pattern: "disapp",',
     );
     assert.match(viewOnceHandler, /silent: true/);
-    assert.match(viewOnceHandler, /saveViewOnceSilently\(Gifted, conText/);
-    assert.doesNotMatch(viewOnceHandler, /await (?:reply|react)\(/);
+    assert.match(viewOnceHandler, /revealQuotedViewOnce\(Gifted, conText/);
+    assert.match(viewOnceDeliverySource, /await react\("⏳"\)/);
 });
 
 test("reply helpers return their send promise so awaited replies finish", () => {

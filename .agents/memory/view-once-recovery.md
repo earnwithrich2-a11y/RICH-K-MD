@@ -1,21 +1,22 @@
 ---
 name: View-once recovery and privacy
-description: Why opened view-once recovery needs saved originals, and why manual recovery must stay in private inboxes.
+description: Direct quoted-media behavior for .vv and separate private cache recovery for reactions and legacy commands.
 ---
 
-Manual view-once recovery must send recovered media only to the connected bot
-owner's private inbox, never to the requester or source group/peer.
+The `.vv` command uses the quoted message directly: in groups, deliver the result
+to the connected bot owner's DM and confirm in the group; in private chats, return
+it to that chat. Actual 👍 reaction events and legacy `.vv2` remain separate
+owner-inbox recovery paths.
 
-**Why:** The user requires owner-only delivery and clean target chats, and has
-since asked for direct quoted-media downloads without pre-download key notices.
+**Why:** The user most recently specified different delivery for group and private
+`.vv` use, with visible progress, success, and download-error feedback.
 
-**How to apply:** Resolve the connected owner before downloading and preserve
-owner/approved-sudo command access. Do not send success notices, error text,
-prefix reactions or reveal reactions into the source chat. Try the quoted media
-with Baileys first; cache lookups are fallbacks, never prerequisites. Send an
-error only when the downloader actually fails, and only to the connected owner's
-DM. Owner-authored 👍 reactions may trigger saving, but bot-generated reaction
-echoes must not loop.
+**How to apply:** Preserve owner/sudo command access. Do not consult custom
+View-Once caches from `.vv`; use the direct quote and Baileys download. React ⏳
+before downloading; group results go to the connected owner DM and receive a
+group ✅, while private results return to the same chat with the original caption.
+Report missing quotes and download failures in the command chat. Keep reaction
+events and `.vv2` on their separate owner-only cache path.
 
 Opening a view-once message on a phone can leave its quote without download
 metadata. Recovery may still work from a saved original or previously downloaded
@@ -25,7 +26,7 @@ bytes, but cannot be guaranteed after both the bot's copy and server media are g
 archives may also unwrap the original envelope, losing the wrapper-only view-once
 marker even while retaining the media and bytes.
 
-**How to apply:** Use ID-only manual recovery caches, combine the quote's marker
+**How to apply:** For cache-based reaction and `.vv2` recovery, use ID-only caches, combine the quote's marker
 with the saved original's media type, prefer existing bytes, and attempt native
 media refresh only when keys are available. Do not generalize this manual cache
 policy to Anti-Delete or Signal resends, and never promise reconstruction of media

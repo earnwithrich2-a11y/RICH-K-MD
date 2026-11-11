@@ -10,16 +10,17 @@
   Notifications use the requested deleted/edited headings, original sender,
   group name or Private DM, and original/edited content. Media retains its type,
   audio voice-note flag and existing durable download/delivery retries.
-- `.vv`, `.👍` and legacy reveal aliases use full-buffer downloads and default-ON
-  background caching. Recovered media goes only to the connected bot owner's DM,
-  never to a group, peer or requesting contact. Success and failure are silent
-  in the source chat: no confirmation, error, prefix reaction or reveal reaction.
-  The quoted media is sent to Baileys before optional cache fallback; no key,
-  cache-presence or cache-expiration check can block the direct attempt. Only
-  an actual download failure is reported privately to the connected owner.
-  Optional command presence/read/reaction automation is skipped for these commands.
-  Owner-authored 👍 reactions are supported through both SDK event shapes;
-  duplicated events, bot-generated reactions and ordinary contacts are ignored.
+- `.vv` and its `.👍` command alias inspect the quoted View-Once message directly
+  and download it without custom cache checks. They react ⏳ before downloading.
+  In groups, successful media delivery goes to the connected bot owner's DM and
+  the group command receives ✅; in private chats the media returns to that chat
+  with its original caption. Missing quotes, expired/404 downloads and other
+  download failures produce a reply in the command chat. Existing owner/sudo
+  command access remains.
+- Actual owner-authored 👍 reactions and legacy `.vv2` continue using the separate
+  cache-based owner-only delivery path. Reaction events support both SDK event
+  shapes; duplicated events, bot-generated reactions and ordinary contacts are
+  ignored.
 - Manual recovery ranks complete originals and quotes rather than letting a
   stripped stored record overwrite good quote metadata. A stale saved download
   can fall back to a complete quote without mixing one version's key with another

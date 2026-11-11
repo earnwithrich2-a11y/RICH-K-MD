@@ -17,8 +17,8 @@ function extractViewOnceMedia(quoted) {
             content = content.deviceSentMessage.message;
         } else {
             const wrapper =
-                content.viewOnceMessage ||
                 content.viewOnceMessageV2 ||
+                content.viewOnceMessage ||
                 content.viewOnceMessageV2Extension;
             if (!wrapper?.message) return null;
             viewOnceWrapper = true;

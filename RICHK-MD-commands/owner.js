@@ -11,7 +11,10 @@ const {
   cachedGroupMetadata,
 } = require("../RICHK-MD-core/connection/groupCache");
 const { recoverViewOnce } = require("../RICHK-MD-core/connection/viewOnceDownload");
-const { saveViewOnceSilently } = require("../RICHK-MD-core/connection/viewOnceDelivery");
+const {
+  revealQuotedViewOnce,
+  saveViewOnceSilently,
+} = require("../RICHK-MD-core/connection/viewOnceDelivery");
 
 const pendingCmdFiles = new Map();
 
@@ -570,10 +573,10 @@ gmd(
     aliases: ["👍", "‎", "reveal"],
     silent: true,
     category: "owner",
-    description: "Reveal View Once Media",
+    description: "Download quoted view-once media directly.",
   },
   async (from, Gifted, conText) => {
-    return saveViewOnceSilently(Gifted, conText, { recover: recoverViewOnce });
+    return revealQuotedViewOnce(Gifted, conText);
   },
 );
 
