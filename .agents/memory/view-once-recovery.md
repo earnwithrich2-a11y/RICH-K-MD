@@ -11,12 +11,12 @@ owner-inbox recovery paths.
 **Why:** The user most recently specified different delivery for group and private
 `.vv` use, with visible progress, success, and download-error feedback.
 
-**How to apply:** Preserve owner/sudo command access. Do not consult custom
-View-Once caches from `.vv`; use the direct quote and Baileys download. React ⏳
-before downloading; group results go to the connected owner DM and receive a
-group ✅, while private results return to the same chat with the original caption.
-Report missing quotes and download failures in the command chat. Keep reaction
-events and `.vv2` on their separate owner-only cache path.
+**How to apply:** Preserve owner/sudo command access. Try the direct quote with
+Baileys first; only if it fails, use the captured original or already-downloaded
+bytes as fallbacks. React ⏳ before downloading; group results go to the connected
+owner DM and receive a group ✅, while private results return to the same chat
+with the original caption. Report missing quotes and download failures in the
+command chat. Keep reaction events and `.vv2` on their separate owner-only path.
 
 Opening a view-once message on a phone can leave its quote without download
 metadata. Recovery may still work from a saved original or previously downloaded

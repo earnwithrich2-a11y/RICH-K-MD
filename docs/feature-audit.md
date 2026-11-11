@@ -39,12 +39,13 @@ loaded by the application and were left alone.
   and audio are supported. Saved copies go only to the connected account's DM.
 - Automatic view-once saving also sends only to the connected account's DM.
   It cannot recover media WhatsApp no longer supplies.
-- The `.vv` command and its `.👍` alias download the quoted View-Once photo,
-  video or audio directly, without consulting custom memory caches. In groups,
-  the media goes to the connected bot owner's DM and `.vv` reacts ✅ in the group;
-  in private chats, media returns to that chat with its caption. It reacts ⏳
-  before downloading and reports missing quotes or download failures in the
-  command chat. Existing owner/sudo command access is retained.
+- The `.vv` command and its `.👍` alias try the quoted View-Once photo, video or
+  audio directly first. If WhatsApp stripped its keys, captured originals and
+  already-downloaded bytes are fallback sources, never prerequisites to the
+  direct attempt. In groups, media goes to the connected bot owner's DM and `.vv`
+  reacts ✅ in the group; in private chats, media returns to that chat with its
+  caption. It reacts ⏳ before downloading and reports missing quotes or download
+  failures in the command chat. Existing owner/sudo access is retained.
 - Owner-authored 👍 reactions and legacy `.vv2` remain a separate recovery path:
   recovered media goes only to the connected bot owner's DM, with message-ID-only
   original/media caches and durable store fallbacks. Opened media is recoverable

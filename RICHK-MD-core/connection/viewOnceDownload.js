@@ -139,7 +139,8 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     const downloadErrors = [];
     function failed(error) {
         downloadErrors.push(error);
-        const code = Number(error?.response?.status || error?.output?.statusCode || error?.statusCode);
+        const code = Number(error?.response?.status || error?.output?.statusCode ||
+            error?.statusCode || error?.status);
         if (Number.isInteger(code) && code >= 100 && code <= 599) statuses.add(code);
     }
     async function attemptDownload(mediaType, media) {
@@ -240,6 +241,8 @@ async function recoverViewOnce(socket, context, { save = mediaContent } = {}) {
     if (!attempted.size && !refreshAttempted && !downloadErrors.length) return null;
     const error = new Error(UNAVAILABLE);
     error.code = "VIEW_ONCE_DOWNLOAD_FAILED";
+    error.httpStatus = [...statuses].find(status => status === 404 || status === 410) || null;
+    if (downloadErrors[0]) error.cause = downloadErrors[0];
     console.warn(`[ViewOnce] Recovery unavailable: reason=${error.code}; originalFound=${originals.length > 0}; ` +
         `mediaPath=${candidates.some(item => item.media.url || item.media.directPath)}; ` +
         `downloadAttempted=${attempted.size > 0}; httpStatus=${[...statuses].join(",") || "unknown"}.`);

@@ -13,14 +13,19 @@ const DOWNLOAD_ERROR = "❌ Could not download this media. Please try again.";
 const DELIVERY_ERROR = "❌ Could not send the recovered media. Please try again.";
 
 function isExpiredMediaError(error) {
-    const status = Number(error?.statusCode ?? error?.status ?? error?.output?.statusCode ??
-        error?.data?.statusCode ?? error?.response?.status);
-    const detail = [error?.message, error?.data?.message, error?.output?.payload?.message]
+    const source = error?.cause || error;
+    const status = Number(source?.statusCode ?? source?.status ?? source?.output?.statusCode ??
+        source?.data?.statusCode ?? source?.response?.status ?? error?.httpStatus);
+    const detail = [source?.message, source?.data?.message, source?.output?.payload?.message]
         .filter(Boolean).join(" ").toLowerCase();
-    return status === 404 || /\b404\b|expired|not found|no longer available/.test(detail);
+    return status === 404 || status === 410 ||
+        /\b404\b|expired|not found|no longer available/.test(detail);
 }
 
-async function revealQuotedViewOnce(socket, context, { download = mediaContent } = {}) {
+async function revealQuotedViewOnce(socket, context, {
+    download = mediaContent,
+    recover = recoverViewOnce,
+} = {}) {
     const message = context.mek || context.ms || context.m || {};
     const from = context.from || message.key?.remoteJid || "";
     const reply = typeof context.reply === "function"
@@ -56,7 +61,10 @@ async function revealQuotedViewOnce(socket, context, { download = mediaContent }
 
     let media;
     try {
-        media = await download(found.mediaType, found.media);
+        // The recovery routine tries this quoted payload first, then can restore
+        // keys or bytes captured when the original incoming message arrived.
+        const recoveryContext = { ...context, quoted: quotedMessage, quotedMsg: quotedMessage };
+        media = await recover(socket, recoveryContext, { save: download });
         if (!media) throw new Error("Baileys returned no media");
     } catch (error) {
         await reply(isExpiredMediaError(error) ? EXPIRED_MEDIA_ERROR : DOWNLOAD_ERROR);

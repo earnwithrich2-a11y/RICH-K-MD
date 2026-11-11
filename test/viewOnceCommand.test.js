@@ -106,6 +106,47 @@ test(".vv accepts modern extension audio and the thumbs-up command alias", async
     assert.equal(result.sent[0][1].ptt, true);
 });
 
+test(".vv recovers stripped quoted keys from the original captured on arrival", async () => {
+    const downloads = [];
+    const result = await runReveal({
+        key: { remoteJid: "test-group@g.us", id: "command" },
+        quoted: { imageMessage: { viewOnce: true } },
+        sender: "15550000002@s.whatsapp.net", isGroup: true,
+        contextOverrides: { quotedKey: { id: "view-once-id", remoteJid: "test-group@g.us" } },
+        socketOverrides: {
+            viewOnceStore: {
+                getById: async () => null,
+                getMessage: async (chat, id) => {
+                    assert.equal(chat, "test-group@g.us");
+                    assert.equal(id, "view-once-id");
+                    return {
+                        key: { remoteJid: chat, id },
+                        message: { viewOnceMessageV2: { message: { imageMessage: {
+                            mediaKey: Buffer.from("captured-key"),
+                            directPath: "/captured-photo",
+                            mimetype: "image/jpeg",
+                            caption: "saved from the original",
+                        } } } },
+                    };
+                },
+            },
+            testDownload: async (media, type) => {
+                downloads.push(media);
+                if (!media.mediaKey) throw new Error("No valid media URL or directPath present in message");
+                assert.equal(type, "image");
+                assert.equal(media.directPath, "/captured-photo");
+                return Readable.from([Buffer.from("recovered from captured keys")]);
+            },
+        },
+    });
+    assert.equal(downloads.length, 2, "Baileys tries the quote first, then the captured original");
+    assert.equal(result.sent[0][0], "15550000001@s.whatsapp.net");
+    assert.deepEqual(result.sent[0][1].image, Buffer.from("recovered from captured keys"));
+    assert.equal(result.sent[0][1].caption, "saved from the original");
+    assert.deepEqual(result.reactions, ["⏳", "✅"]);
+    assert.deepEqual(result.replies, []);
+});
+
 test(".vv explains when the quote is not a view-once message", async () => {
     const result = await runReveal({
         key: { remoteJid: "15550000002@s.whatsapp.net" },

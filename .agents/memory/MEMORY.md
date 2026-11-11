@@ -13,4 +13,4 @@
 - [Maintenance safety](maintenance-safety.md) — strict owner/connected/sudo access, no logout or credential replacement, and safe fast-forward-only updates.
 - [Clean command responses](command-output-style.md) — no automatic header/footer frames; update notices use the user's plain, nontechnical wording.
 - [Optional automation safety](optional-automation-policy.md) — OFF defaults except private View-Once caching; preserve working commands and existing recovery/group protections.
-- [View-once recovery](view-once-recovery.md) — `.vv` downloads its quote directly; group and private delivery differ, while reaction recovery remains cached and owner-only.
+- [View-once recovery](view-once-recovery.md) — `.vv` tries the quote first, then saved fallbacks; group and private delivery differ, reactions stay owner-only.
