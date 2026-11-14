@@ -414,7 +414,24 @@ function formatBytes(bytes) {
 
 async function loadSession() {
     try {
-        if (hasStoredCredentials(path.join(sessionDir, 'session.db'))) {
+        const crypto = require("crypto");
+        const hashFile = path.join(sessionDir, "session_id.hash");
+        const currentHash = config.SESSION_ID ? crypto.createHash("sha256").update(config.SESSION_ID.trim()).digest("hex") : null;
+        const previousHash = fs.existsSync(hashFile) ? fs.readFileSync(hashFile, "utf8").trim() : null;
+
+        // If a new session string was given, clear old dead session files so it doesn't reuse them
+        if (currentHash && previousHash && currentHash !== previousHash) {
+            console.log("🔄 New SESSION_ID detected. Clearing stale session database...");
+            const dbFiles = ["session.db", "session.db-wal", "session.db-shm", "creds.json"];
+            for (const file of dbFiles) {
+                const p = path.join(sessionDir, file);
+                if (fs.existsSync(p)) {
+                    try { fs.unlinkSync(p); } catch {}
+                }
+            }
+        }
+
+        if (hasStoredCredentials(path.join(sessionDir, 'session.db')) && (!currentHash || currentHash === previousHash)) {
             console.log("✅ Existing session database retained");
             return;
         }
@@ -455,6 +472,10 @@ async function loadSession() {
             throw error;
         }
         console.log("✅ Session File Loaded");
+
+        if (currentHash) {
+            try { fs.writeFileSync(hashFile, currentHash, "utf8"); } catch {}
+        }
 
     } catch (e) {
         console.error("❌ Session Error:", e.message);
