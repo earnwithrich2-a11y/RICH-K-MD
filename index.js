@@ -340,24 +340,27 @@ async function startGifted() {
 
         setupCommandHandler(Gifted);
 
-        setupConnectionHandler(Gifted, sessionDir, startGifted, {
+                setupConnectionHandler(Gifted, sessionDir, startGifted, {
             onOpen: async (Gifted) => {
                 console.info(
                     `[WhatsApp] Own LID identity ${Gifted.user?.lid ? "available" : "unavailable"} for self-chat routing.`,
                 );
-                const s = await getAllSettings();
-                await safeNewsletterFollow(Gifted, s.NEWSLETTER_JID);
-                await safeGroupAcceptInvite(Gifted, s.GC_JID);
-                await initializeLidStore(Gifted);
-
                 console.log("💜 Connected to Whatsapp, Active!");
-                try {
-                    await sendConnectedGreeting(Gifted);
-                } catch (err) {
-                    console.error("Post-connection greeting failed:", err);
-                }
+
+                // Wait 30 seconds so WhatsApp encryption keys finish syncing before sending messages
+                setTimeout(async () => {
+                    try {
+                        const s = await getAllSettings();
+                        if (s.NEWSLETTER_JID) await safeNewsletterFollow(Gifted, s.NEWSLETTER_JID);
+                        await initializeLidStore(Gifted);
+                        await sendConnectedGreeting(Gifted);
+                    } catch (err) {
+                        console.error("Delayed post-connection greeting failed:", err);
+                    }
+                }, 30000);
             },
         });
+
 
     } catch (error) {
         console.error("Socket initialization error:", error);
